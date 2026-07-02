@@ -177,3 +177,30 @@ describe("Local Ollama backend configuration", () => {
     expect(worker).toContain("ollama_local");
   });
 });
+
+describe("Mini Model Lab", () => {
+  test("exposes a Studio tab and builder module for mini model training", () => {
+    const tools = fs.readFileSync(path.join(root, "src/pages/Tools.jsx"), "utf8");
+    expect(tools).toContain('id: "model-lab", label: "Model Lab"');
+    expect(tools).toContain('id: "model_lab", label: "Mini Model Lab"');
+    expect(tools).toContain("MiniModelLab");
+    expect(tools).toContain('data-testid="mini-model-lab-section"');
+  });
+
+  test("prepares JSONL training data and trains a browser n-gram model", () => {
+    const tools = fs.readFileSync(path.join(root, "src/pages/Tools.jsx"), "utf8");
+    expect(tools).toContain("makeTrainingExamples");
+    expect(tools).toContain("trainNgramModel");
+    expect(tools).toContain("generateFromMiniModel");
+    expect(tools).toContain('data-testid="mini-model-export-jsonl"');
+    expect(tools).toContain('data-testid="mini-model-train"');
+  });
+
+  test("saves mini model records through Cloudflare KV routes", () => {
+    const worker = fs.readFileSync(path.resolve(root, "cloudflare/_worker.js"), "utf8");
+    expect(worker).toContain('path === "/tools/mini-models"');
+    expect(worker).toContain("normalizeMiniModelRecord");
+    expect(worker).toContain("mini-model:${user.user_id}");
+    expect(worker).toContain("model_lab");
+  });
+});

@@ -76,6 +76,9 @@ const MAX_BRIEF_MATTER_CHARS = 12000;
 const MAX_BRIEF_AUTHORITY_SUMMARY_CHARS = 2500;
 const MAX_BRIEF_AUTHORITIES = 30;
 const MAX_DRAFTING_FIELD_CHARS = 12000;
+const MAX_MINI_MODEL_SOURCE_CHARS = 120000;
+const MAX_MINI_MODEL_JSONL_CHARS = 220000;
+const MAX_MINI_MODEL_DATA_CHARS = 260000;
 const DRAFTING_DOCUMENT_TYPES = {
   letter_of_claim: "Letter of claim",
   general_letter: "General letter",
@@ -83,7 +86,7 @@ const DRAFTING_DOCUMENT_TYPES = {
   settlement_letter: "Settlement letter",
   custom_letter: "Custom letter",
 };
-const ALLOWED_APP_MODULES = ["rag", "caselaw", "camera", "compare", "chronology", "guided_reader", "brief_export", "audit"];
+const ALLOWED_APP_MODULES = ["rag", "caselaw", "camera", "compare", "chronology", "model_lab", "guided_reader", "brief_export", "audit"];
 const memory = globalThis.__ADA_MEMORY_STORE || (globalThis.__ADA_MEMORY_STORE = new Map());
 
 function json(data, status = 200, headers = {}) {
@@ -1036,6 +1039,52 @@ function normalizeCameraNote(user, body) {
       question: String(message.question || "").trim().slice(0, 1000),
       answer: String(message.answer || "").trim().slice(0, 6000),
     })).filter((message) => message.question || message.answer) : [],
+    created_at: body.created_at || now,
+    updated_at: now,
+  };
+}
+
+function clampJsonValue(value, maxChars) {
+  if (value === undefined || value === null) return null;
+  const raw = JSON.stringify(value);
+  if (raw.length <= maxChars) return value;
+  return {
+    truncated: true,
+    type: value.type || "json",
+    order: value.order,
+    token_count: value.token_count,
+    vocabulary_size: value.vocabulary_size,
+    transition_count: value.transition_count,
+    preview: raw.slice(0, Math.min(4000, maxChars)),
+  };
+}
+
+function normalizeMiniModelRecord(user, body) {
+  const now = nowIso();
+  const modelId = String(body.model_id || "").trim() || id("model");
+  const sourceText = normalizeExtractedText(body.source_text || "").slice(0, MAX_MINI_MODEL_SOURCE_CHARS);
+  const jsonl = String(body.jsonl || "").trim().slice(0, MAX_MINI_MODEL_JSONL_CHARS);
+  const stats = body.stats && typeof body.stats === "object" ? {
+    chars: Number(body.stats.chars || sourceText.length) || sourceText.length,
+    tokens: Number(body.stats.tokens || 0) || 0,
+    vocabulary: Number(body.stats.vocabulary || 0) || 0,
+    examples: Number(body.stats.examples || 0) || 0,
+  } : {
+    chars: sourceText.length,
+    tokens: sourceText.split(/\s+/).filter(Boolean).length,
+    vocabulary: 0,
+    examples: jsonl ? jsonl.split(/\n+/).filter(Boolean).length : 0,
+  };
+  return {
+    model_id: modelId,
+    owner_id: user.user_id,
+    name: String(body.name || "Mini language model").trim().slice(0, 120) || "Mini language model",
+    description: String(body.description || "").trim().slice(0, 500),
+    training_mode: String(body.training_mode || "browser-ngram-plus-jsonl-export").trim().slice(0, 80),
+    source_text: sourceText,
+    jsonl,
+    stats,
+    model_data: clampJsonValue(body.model_data || null, MAX_MINI_MODEL_DATA_CHARS),
     created_at: body.created_at || now,
     updated_at: now,
   };
@@ -2899,6 +2948,8 @@ function selectedFeatureLabels(modules) {
     caselaw: "UK case-law search",
     camera: "camera OCR capture",
     compare: "document comparison",
+    chronology: "chronology builder",
+    model_lab: "mini model training lab",
     guided_reader: "saccadic guided reader",
     brief_export: "brief export",
     audit: "audit metadata",
@@ -3468,6 +3519,23 @@ async function handleApi(request, env) {
   const cameraNoteDelete = /^\/tools\/camera-notes\/([^/]+)$/.exec(path);
   if (method === "DELETE" && cameraNoteDelete) {
     await kvDelete(env, `camera-note:${user.user_id}:${cameraNoteDelete[1]}`);
+    return json({ ok: true });
+  }
+  if (method === "GET" && path === "/tools/mini-models") {
+    const models = await kvList(env, `mini-model:${user.user_id}:`);
+    models.sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+    return json(models);
+  }
+  if (method === "POST" && path === "/tools/mini-models") {
+    const body = await parseJson(request);
+    const record = normalizeMiniModelRecord(user, body);
+    if (!record.source_text && !record.jsonl && !record.model_data) return error(422, "Add training data or train a mini model before saving.");
+    await kvPut(env, `mini-model:${user.user_id}:${record.model_id}`, record);
+    return json(record);
+  }
+  const miniModelDelete = /^\/tools\/mini-models\/([^/]+)$/.exec(path);
+  if (method === "DELETE" && miniModelDelete) {
+    await kvDelete(env, `mini-model:${user.user_id}:${miniModelDelete[1]}`);
     return json({ ok: true });
   }
   if (method === "POST" && path === "/tools/reader-ocr") {

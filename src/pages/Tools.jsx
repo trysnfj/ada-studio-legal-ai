@@ -47,6 +47,7 @@ const STUDIO_TABS = [
   { id: "compare", label: "Compare", icon: GitCompareArrows },
   { id: "chronology", label: "Chronology", icon: ClipboardList },
   { id: "camera", label: "Camera AI", icon: Camera },
+  { id: "model-lab", label: "Model Lab", icon: Sparkles },
   { id: "reader", label: "Guided Reader", icon: BookOpen },
   { id: "case-law", label: "Case Law", icon: Scale },
   { id: "drafting-tool", label: "Drafting Tool", icon: FileSignature },
@@ -72,6 +73,7 @@ const FEATURE_BLOCKS = [
   { id: "camera", label: "Camera OCR", desc: "Capture photos into the document store.", icon: Camera },
   { id: "compare", label: "Compare", desc: "Compare two versions or opposing drafts.", icon: GitCompareArrows },
   { id: "chronology", label: "Chronology", desc: "Extract dated events into a litigation timeline.", icon: ClipboardList },
+  { id: "model_lab", label: "Mini Model Lab", desc: "Prepare JSONL data and train tiny browser language models.", icon: Sparkles },
   { id: "guided_reader", label: "Guided Reader", desc: "Open the saccadic guided reading tool.", icon: BookOpen },
   { id: "brief_export", label: "Bundles & Export", desc: "Export answers and matter bundles to Word, PDF, and PowerPoint.", icon: FileSignature },
   { id: "audit", label: "Audit", desc: "Include compliance metadata in app outputs.", icon: ClipboardList },
@@ -1085,6 +1087,355 @@ export function CameraTool({ standalone = false }) {
             </div>
           </div>
         </section>
+      </div>
+    </section>
+  );
+}
+
+const MINI_MODEL_SAMPLE = `The client says the supplier missed the delivery deadline and caused additional storage costs. The contract requires written notice before termination. The next step is to check the notice clause, preserve correspondence, and calculate the losses.`;
+
+function tokenizeModelText(value) {
+  return String(value || "").toLowerCase().match(/[a-z0-9']+|[.,;:!?]/g) || [];
+}
+
+function makeTrainingExamples(sourceText) {
+  const cleaned = String(sourceText || "").replace(/\s+/g, " ").trim();
+  const sentences = cleaned.split(/(?<=[.!?])\s+/).map((line) => line.trim()).filter(Boolean);
+  const chunks = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if (`${current} ${sentence}`.trim().length > 900 && current) {
+      chunks.push(current.trim());
+      current = sentence;
+    } else {
+      current = `${current} ${sentence}`.trim();
+    }
+  }
+  if (current) chunks.push(current.trim());
+  const usableChunks = (chunks.length ? chunks : cleaned ? [cleaned] : []).slice(0, 80);
+  return usableChunks.map((chunk, index) => ({
+    id: index + 1,
+    prompt: `Summarise and extract useful next steps from source passage ${index + 1}.`,
+    completion: chunk,
+    messages: [
+      { role: "user", content: `Summarise this source passage and identify useful next steps:\n\n${chunk}` },
+      { role: "assistant", content: chunk },
+    ],
+  }));
+}
+
+function trainNgramModel(sourceText, order = 2) {
+  const tokens = tokenizeModelText(sourceText);
+  const n = Math.max(1, Math.min(3, Number(order) || 2));
+  const transitions = {};
+  const starts = [];
+  for (let index = 0; index < tokens.length - n; index += 1) {
+    const context = tokens.slice(index, index + n).join(" ");
+    const next = tokens[index + n];
+    transitions[context] = transitions[context] || {};
+    transitions[context][next] = (transitions[context][next] || 0) + 1;
+    if (index === 0 || /[.!?]/.test(tokens[index - 1])) starts.push(context);
+  }
+  return {
+    type: "browser-ngram",
+    order: n,
+    vocabulary_size: new Set(tokens).size,
+    token_count: tokens.length,
+    transition_count: Object.keys(transitions).length,
+    starts: starts.slice(0, 400),
+    transitions,
+    trained_at: new Date().toISOString(),
+  };
+}
+
+function chooseWeighted(counts) {
+  const entries = Object.entries(counts || {});
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  if (!entries.length || total <= 0) return "";
+  let cursor = Math.random() * total;
+  for (const [token, count] of entries) {
+    cursor -= count;
+    if (cursor <= 0) return token;
+  }
+  return entries[entries.length - 1][0];
+}
+
+function generateFromMiniModel(model, seed, maxWords = 90) {
+  if (!model?.transitions) return "";
+  const order = model.order || 2;
+  const seedTokens = tokenizeModelText(seed);
+  let context = seedTokens.slice(-order).join(" ");
+  if (!model.transitions[context]) {
+    context = model.starts?.[0] || Object.keys(model.transitions)[0] || "";
+  }
+  const output = context ? context.split(" ") : [];
+  for (let index = 0; index < maxWords; index += 1) {
+    const key = output.slice(-order).join(" ");
+    const next = chooseWeighted(model.transitions[key]);
+    if (!next) break;
+    output.push(next);
+    if (output.length > 24 && /[.!?]/.test(next) && Math.random() > 0.35) break;
+  }
+  return output.join(" ")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .replace(/(^\w|\.\s+\w)/g, (match) => match.toUpperCase());
+}
+
+function MiniModelLab() {
+  const [name, setName] = useState("Matter note mini model");
+  const [description, setDescription] = useState("Prototype a small language model from uploaded matter notes.");
+  const [sourceText, setSourceText] = useState(MINI_MODEL_SAMPLE);
+  const [order, setOrder] = useState(2);
+  const [dataset, setDataset] = useState([]);
+  const [model, setModel] = useState(null);
+  const [seed, setSeed] = useState("The next step is");
+  const [sample, setSample] = useState("");
+  const [savedModels, setSavedModels] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  const stats = useMemo(() => {
+    const tokens = tokenizeModelText(sourceText);
+    return {
+      chars: sourceText.length,
+      tokens: tokens.length,
+      vocabulary: new Set(tokens).size,
+      examples: dataset.length,
+    };
+  }, [sourceText, dataset.length]);
+
+  const refreshModels = async () => {
+    try {
+      const { data } = await api.get("/tools/mini-models");
+      setSavedModels(Array.isArray(data) ? data : []);
+    } catch {
+      setSavedModels([]);
+    }
+  };
+
+  useEffect(() => { refreshModels(); }, []);
+
+  const loadTrainingFile = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    setSourceText(text);
+    setName(file.name.replace(/\.[^.]+$/, "") || "Uploaded mini model");
+    setDataset([]);
+    setModel(null);
+    setSample("");
+  };
+
+  const prepareDataset = () => {
+    const examples = makeTrainingExamples(sourceText);
+    if (!examples.length) {
+      toast.error("Add training text before preparing data");
+      return;
+    }
+    setDataset(examples);
+    toast.success(`Prepared ${examples.length} JSONL examples`);
+  };
+
+  const train = () => {
+    const trained = trainNgramModel(sourceText, order);
+    if (trained.token_count < 20) {
+      toast.error("Add at least 20 tokens of training text");
+      return;
+    }
+    setModel(trained);
+    setSample(generateFromMiniModel(trained, seed));
+    toast.success("Tiny browser model trained");
+  };
+
+  const exportJsonl = () => {
+    const examples = dataset.length ? dataset : makeTrainingExamples(sourceText);
+    if (!examples.length) {
+      toast.error("Prepare training data first");
+      return;
+    }
+    const body = examples.map((example) => JSON.stringify({ messages: example.messages })).join("\n");
+    downloadBlob(new Blob([body], { type: "application/x-ndjson" }), `${fileSlug(name)}-training-data.jsonl`);
+  };
+
+  const exportConfig = () => {
+    const payload = {
+      name,
+      description,
+      training_route: "Use exported JSONL with a Python/GPU transformer training or fine-tuning pipeline.",
+      browser_model: model,
+      dataset_examples: dataset.length ? dataset.length : makeTrainingExamples(sourceText).length,
+      notes: [
+        "Cloudflare Workers are not suitable for long-running transformer training.",
+        "The in-browser model is a lightweight n-gram prototype for experimentation.",
+        "For a real mini transformer, use the JSONL export with a GPU notebook or training service.",
+      ],
+    };
+    downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), `${fileSlug(name)}-model-config.json`);
+  };
+
+  const saveModel = async () => {
+    const examples = dataset.length ? dataset : makeTrainingExamples(sourceText);
+    if (!model) {
+      toast.error("Train the browser model before saving");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data } = await api.post("/tools/mini-models", {
+        name,
+        description,
+        training_mode: "browser-ngram-plus-jsonl-export",
+        source_text: sourceText,
+        jsonl: examples.map((example) => JSON.stringify({ messages: example.messages })).join("\n"),
+        stats,
+        model_data: model,
+      });
+      setSavedModels((current) => [data, ...current.filter((item) => item.model_id !== data.model_id)]);
+      toast.success("Saved mini model");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Could not save model");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadSavedModel = (record) => {
+    setName(record.name || "Saved mini model");
+    setDescription(record.description || "");
+    setSourceText(record.source_text || "");
+    setDataset(makeTrainingExamples(record.source_text || ""));
+    setModel(record.model_data || null);
+    setSample(record.model_data ? generateFromMiniModel(record.model_data, seed) : "");
+  };
+
+  const deleteSavedModel = async (modelId) => {
+    try {
+      await api.delete(`/tools/mini-models/${modelId}`);
+      setSavedModels((current) => current.filter((item) => item.model_id !== modelId));
+      toast.success("Deleted mini model");
+    } catch {
+      toast.error("Could not delete model");
+    }
+  };
+
+  return (
+    <section data-testid="mini-model-lab-section">
+      <div className="mb-6">
+        <h2 className="font-serif text-3xl tracking-tight mb-2">Mini Model Lab</h2>
+        <p className="text-sm text-gray-600 max-w-3xl">Create training data from your own text, train a tiny browser language model for fast experimentation, and export JSONL/config files for a real GPU-based transformer workflow.</p>
+      </div>
+
+      <div className="mb-6 border border-klein bg-klein-bg p-4 text-sm leading-relaxed" data-testid="mini-model-reality-note">
+        Training the transformer described in the referenced guide is possible, but not inside a Cloudflare Worker. It needs Python, PyTorch, and a GPU runtime. This lab prepares the data and trains a small local n-gram model in the browser so users can prototype safely before moving to GPU training.
+      </div>
+
+      <div className="grid lg:grid-cols-12 gap-6">
+        <section className="lg:col-span-7 border border-gray-200 p-4 sm:p-5">
+          <div className="grid sm:grid-cols-2 gap-3 mb-4">
+            <label>
+              <span className="block text-xs font-bold uppercase tracking-wider mb-1">Model name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-gray-300 px-3 py-2.5 text-sm" data-testid="mini-model-name" />
+            </label>
+            <label>
+              <span className="block text-xs font-bold uppercase tracking-wider mb-1">N-gram order</span>
+              <select value={order} onChange={(e) => setOrder(Number(e.target.value))} className="w-full border border-gray-300 bg-white px-3 py-2.5 text-sm" data-testid="mini-model-order">
+                <option value={1}>1 - very small</option>
+                <option value={2}>2 - balanced</option>
+                <option value={3}>3 - more contextual</option>
+              </select>
+            </label>
+          </div>
+          <label className="block mb-4">
+            <span className="block text-xs font-bold uppercase tracking-wider mb-1">Training goal</span>
+            <input value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border border-gray-300 px-3 py-2.5 text-sm" data-testid="mini-model-description" />
+          </label>
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <label className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs inline-flex items-center gap-2 cursor-pointer" data-testid="mini-model-upload">
+              <Upload size={13} /> Upload .txt/.md/.jsonl
+              <input type="file" accept=".txt,.md,.json,.jsonl,text/plain,application/json" hidden onChange={(e) => loadTrainingFile(e.target.files?.[0])} />
+            </label>
+            <button onClick={() => setSourceText(MINI_MODEL_SAMPLE)} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Load sample</button>
+            <button onClick={() => setSourceText("")} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Clear</button>
+          </div>
+          <textarea
+            value={sourceText}
+            onChange={(e) => {
+              setSourceText(e.target.value);
+              setDataset([]);
+              setModel(null);
+              setSample("");
+            }}
+            rows={14}
+            placeholder="Paste source text, notes, clauses, correspondence, or JSONL training material."
+            className="w-full border border-gray-300 px-3 py-2.5 text-sm leading-relaxed focus:border-klein focus:outline-none"
+            data-testid="mini-model-source"
+          />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 border-l border-t border-gray-200 mt-4" data-testid="mini-model-stats">
+            {[
+              ["Characters", stats.chars.toLocaleString()],
+              ["Tokens", stats.tokens.toLocaleString()],
+              ["Vocabulary", stats.vocabulary.toLocaleString()],
+              ["Examples", stats.examples.toLocaleString()],
+            ].map(([label, value]) => (
+              <div key={label} className="border-r border-b border-gray-200 p-3">
+                <div className="font-serif text-2xl">{value}</div>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500">{label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={prepareDataset} className="bg-ink text-white px-4 py-2.5 hover:bg-klein text-sm inline-flex items-center gap-2" data-testid="mini-model-prepare">
+              <FileText size={14} /> Prepare dataset
+            </button>
+            <button onClick={train} className="border border-ink px-4 py-2.5 hover:bg-gray-50 text-sm inline-flex items-center gap-2" data-testid="mini-model-train">
+              <Play size={14} /> Train browser model
+            </button>
+            <button onClick={exportJsonl} className="border border-gray-300 px-4 py-2.5 hover:border-ink hover:bg-gray-50 text-sm inline-flex items-center gap-2" data-testid="mini-model-export-jsonl">
+              <Download size={14} /> JSONL
+            </button>
+            <button onClick={exportConfig} className="border border-gray-300 px-4 py-2.5 hover:border-ink hover:bg-gray-50 text-sm inline-flex items-center gap-2" data-testid="mini-model-export-config">
+              <Download size={14} /> Config
+            </button>
+            <button onClick={saveModel} disabled={busy || !model} className="border border-gray-300 px-4 py-2.5 hover:border-ink hover:bg-gray-50 text-sm disabled:opacity-50 inline-flex items-center gap-2" data-testid="mini-model-save">
+              <Save size={14} /> {busy ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </section>
+
+        <aside className="lg:col-span-5 space-y-5">
+          <section className="border border-gray-200 p-4" data-testid="mini-model-generator">
+            <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 mb-2">Generation test</div>
+            <input value={seed} onChange={(e) => setSeed(e.target.value)} className="w-full border border-gray-300 px-3 py-2.5 text-sm mb-3" data-testid="mini-model-seed" />
+            <button onClick={() => setSample(generateFromMiniModel(model, seed))} disabled={!model} className="bg-ink text-white px-4 py-2.5 hover:bg-klein text-sm disabled:opacity-50 inline-flex items-center gap-2" data-testid="mini-model-generate">
+              <Sparkles size={14} /> Generate sample
+            </button>
+            <div className="mt-3 border border-gray-200 bg-gray-50 p-3 min-h-[120px] text-sm whitespace-pre-wrap leading-relaxed" data-testid="mini-model-sample">
+              {sample || "Train the browser model, then generate a short sample from your seed phrase."}
+            </div>
+          </section>
+
+          <section className="border border-gray-200 p-4" data-testid="mini-model-saved">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 inline-flex items-center gap-2"><FolderOpen size={13} /> Saved mini models</div>
+              <button onClick={refreshModels} className="border border-gray-300 px-3 py-1.5 hover:border-ink hover:bg-gray-50 text-xs">Refresh</button>
+            </div>
+            <div className="border border-gray-200 max-h-[320px] overflow-auto">
+              {savedModels.length === 0 ? (
+                <div className="p-4 text-sm text-gray-500">No saved mini models yet.</div>
+              ) : savedModels.map((record) => (
+                <div key={record.model_id} className="border-b border-gray-200 last:border-b-0 p-3 flex items-start justify-between gap-3">
+                  <button onClick={() => loadSavedModel(record)} className="text-left min-w-0 flex-1" data-testid={`mini-model-load-${record.model_id}`}>
+                    <div className="text-sm font-medium truncate">{record.name || "Mini model"}</div>
+                    <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 truncate">
+                      {record.training_mode || "browser-ngram"} / {(record.stats?.tokens || record.model_data?.token_count || 0).toLocaleString()} tokens
+                    </div>
+                  </button>
+                  <button onClick={() => deleteSavedModel(record.model_id)} className="text-gray-400 hover:text-red-600 p-1" aria-label="Delete mini model" data-testid={`mini-model-delete-${record.model_id}`}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
       </div>
     </section>
   );
@@ -2210,6 +2561,7 @@ export default function Tools() {
         {activeTab === "compare" && <CompareTool models={models} />}
         {activeTab === "chronology" && <ChronologyTool models={models} />}
         {activeTab === "camera" && <CameraTool />}
+        {activeTab === "model-lab" && <MiniModelLab />}
         {activeTab === "reader" && <GuidedReaderTool />}
         {activeTab === "case-law" && <CaseLawTool />}
         {activeTab === "drafting-tool" && <DraftingTool models={models} onOpenCaseLaw={() => selectTab("case-law")} />}

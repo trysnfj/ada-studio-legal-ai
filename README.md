@@ -14,6 +14,7 @@ ADA Studio is a legal AI workspace for building and running source-grounded lega
 - Case-law search with AI summaries and BAILII links.
 - Drafting Tool for legal correspondence, including letters of claim and settlement letters.
 - Chronology Builder for extracting dated matter events.
+- Mini Model Lab for preparing JSONL datasets, training tiny browser language models, saving experiments, and exporting configs for GPU training workflows.
 - Compare tool for side-by-side document review.
 - Standalone Camera Document AI at `/camera` for photo/screenshot OCR, source-type-aware summaries, chat, saved note folders, and Word/PDF exports.
 - Guided Reader with file upload, camera OCR, summary, chat, and document export.
@@ -171,6 +172,7 @@ If your Cloudflare account uses different project, bucket, queue, or KV names, u
 - `/` - landing page
 - `/studio` - unified Studio hub
 - `/camera` - standalone Camera Document AI
+- `/studio?tab=model-lab` - Mini Model Lab for dataset preparation and small browser model experiments
 - `/apps/:appId` - generated legal app detail page
 - `/camera-ai` and `/camera-ocr` - compatibility redirects to `/camera`
 - `/brief-builder` - compatibility redirect to the Drafting Tool route
