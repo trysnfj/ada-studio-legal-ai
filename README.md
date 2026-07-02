@@ -1,70 +1,183 @@
-# Getting Started with Create React App
+# ADA Studio
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+ADA Studio is a legal AI workspace for building and running source-grounded legal tools. It combines document RAG, case-law research, drafting, comparison, chronology building, camera OCR, guided reading, and export workflows in one React application with a Cloudflare Worker backend.
 
-## Available Scripts
+> ADA Studio provides AI-generated legal information, not legal advice. Verify important outputs against source documents and current law before relying on them.
 
-In the project directory, you can run:
+## Key Features
 
-### `npm start`
+- Unified Studio hub for app creation, tools, research, drafting, and exports.
+- Natural-language legal app builder with selectable modules.
+- Document RAG with PDF, DOCX, TXT, and MD ingestion.
+- R2-backed document storage and parser queue support for larger files.
+- Ollama Cloud model selection for assistant and tool responses.
+- Case-law search with AI summaries and BAILII links.
+- Drafting Tool for legal correspondence, including letters of claim and settlement letters.
+- Chronology Builder for extracting dated matter events.
+- Compare tool for side-by-side document review.
+- Standalone Camera Document AI at `/camera` for photo OCR, summary, chat, and Word/PDF exports.
+- Guided Reader with file upload, camera OCR, summary, chat, and document export.
+- Matter bundle and structured export support for Word, PDF, and PowerPoint-style outputs.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Tech Stack
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- React 19
+- React Router 7
+- CRACO / Create React App
+- Tailwind CSS
+- Lucide icons
+- Cloudflare Pages Functions / Worker
+- Cloudflare KV
+- Cloudflare R2
+- Cloudflare Queues
+- Cloudflare Workers AI for OCR fallback
+- Ollama Cloud for selected LLM models
 
-### `npm test`
+## Repository Layout
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```text
+cloudflare/
+  _worker.js           Cloudflare Pages/Worker API and app backend
+  parser-worker.js     Queue consumer for asynchronous document parsing
+src/
+  components/          Shared React components
+  lib/                 API client, exports, drafting helpers, tests
+  pages/               Studio, app detail, standalone tools, landing pages
+public/                CRA public assets
+wrangler.jsonc         Cloudflare Pages/Worker deployment config
+wrangler.parser.jsonc  Parser Worker deployment config
+```
 
-### `npm run build`
+## Local Development
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+Install dependencies:
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```bash
+npm install
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Start the React dev server:
 
-### `npm run eject`
+```bash
+npm start
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+The app runs at:
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```text
+http://localhost:3000
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Build for production:
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+npm run build
+```
 
-## Learn More
+Build for Cloudflare Pages:
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+```bash
+npm run build:cloudflare
+```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+Run tests:
 
-### Code Splitting
+```bash
+npm test -- --watchAll=false
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+Run the focused regression tests:
 
-### Analyzing the Bundle Size
+```bash
+npm test -- --watchAll=false src/lib/draftingTool.test.js
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+## Cloudflare Setup
 
-### Making a Progressive Web App
+The app expects these Cloudflare resources:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+- KV namespace bound as `ADA_KV`
+- R2 bucket bound as `DOCUMENTS_R2`
+- Queue producer and consumer for `ada-studio-parse`
+- Workers AI binding as `AI`
+- Parser Worker deployed from `cloudflare/parser-worker.js`
 
-### Advanced Configuration
+The checked-in configs are:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+- `wrangler.jsonc` for the main Pages/Worker deployment
+- `wrangler.parser.jsonc` for the parser Worker
 
-### Deployment
+Before production deployment, replace placeholder resource IDs and secrets with values from your Cloudflare account.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## Required Secrets
 
-### `npm run build` fails to minify
+Set these as Cloudflare secrets rather than committing them:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```bash
+wrangler secret put JWT_SECRET
+wrangler secret put OLLAMA_API_KEY
+```
+
+Optional:
+
+```bash
+wrangler secret put OLLAMA_HOST
+```
+
+`OLLAMA_HOST` defaults to `https://ollama.com` if not provided.
+
+For local React development, create a local `.env` only if the frontend needs to call a separate backend:
+
+```bash
+REACT_APP_BACKEND_URL=http://localhost:8787
+```
+
+Do not commit `.env` files.
+
+## Deployment
+
+Build the app and copy the Worker into the build output:
+
+```bash
+npm run build:cloudflare
+```
+
+Deploy the main Cloudflare app:
+
+```bash
+wrangler pages deploy build --project-name ada-studio
+```
+
+Deploy the parser Worker:
+
+```bash
+wrangler deploy --config wrangler.parser.jsonc
+```
+
+If your Cloudflare account uses different project, bucket, queue, or KV names, update the Wrangler config files before deploying.
+
+## Important Routes
+
+- `/` - landing page
+- `/studio` - unified Studio hub
+- `/camera` - standalone Camera Document AI
+- `/apps/:appId` - generated legal app detail page
+- `/camera-ai` and `/camera-ocr` - compatibility redirects to `/camera`
+- `/brief-builder` - compatibility redirect to the Drafting Tool route
+
+## Validation
+
+Recently verified:
+
+```bash
+npm test -- --watchAll=false src/lib/draftingTool.test.js
+npm run build
+```
+
+The production build may show an existing React hook dependency warning in `src/pages/AppDetail.jsx`; it does not block compilation.
+
+## Notes
+
+- Keep `node_modules`, `build`, `.wrangler`, local `.env` files, Playwright scratch files, and generated presentation outputs out of git.
+- The backend is designed to prefer selected Ollama Cloud models where configured.
+- OCR quality depends on image clarity, lighting, and the availability of Cloudflare AI OCR support.
