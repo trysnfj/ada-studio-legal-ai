@@ -19,6 +19,18 @@ export function AuthProvider({ children }) {
       }
       return guestId;
     };
+    const startLocalGuestSession = () => {
+      const guestId = ensureGuestId();
+      const user = {
+        user_id: `local_guest_${guestId.slice(0, 18)}`,
+        email: "guest@local.ada",
+        name: "Local Guest",
+        auth_provider: "local_guest",
+      };
+      localStorage.removeItem("ada_token");
+      localStorage.setItem("ada_user", JSON.stringify(user));
+      if (alive) setUser(user);
+    };
     const startGuestSession = async () => {
       const { data } = await api.post("/auth/guest", { guest_id: ensureGuestId() });
       localStorage.setItem("ada_token", data.token);
@@ -38,7 +50,11 @@ export function AuthProvider({ children }) {
       } catch {
         localStorage.removeItem("ada_token");
         localStorage.removeItem("ada_user");
-        await startGuestSession();
+        try {
+          await startGuestSession();
+        } catch {
+          startLocalGuestSession();
+        }
       } finally {
         if (alive) setLoading(false);
       }

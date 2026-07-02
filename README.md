@@ -10,7 +10,7 @@ ADA Studio is a legal AI workspace for building and running source-grounded lega
 - Natural-language legal app builder with selectable modules.
 - Document RAG with PDF, DOCX, TXT, and MD ingestion.
 - R2-backed document storage and parser queue support for larger files.
-- Ollama Cloud model selection for assistant and tool responses.
+- Ollama Cloud or local Ollama model selection for assistant and tool responses.
 - Case-law search with AI summaries and BAILII links.
 - Drafting Tool for legal correspondence, including letters of claim and settlement letters.
 - Chronology Builder for extracting dated matter events.
@@ -31,7 +31,7 @@ ADA Studio is a legal AI workspace for building and running source-grounded lega
 - Cloudflare R2
 - Cloudflare Queues
 - Cloudflare Workers AI for OCR fallback
-- Ollama Cloud for selected LLM models
+- Ollama Cloud or local Ollama for selected LLM models
 
 ## Repository Layout
 
@@ -126,6 +126,16 @@ wrangler secret put OLLAMA_HOST
 
 `OLLAMA_HOST` defaults to `https://ollama.com` if not provided.
 
+For local Ollama development, run Ollama locally and point the backend at it:
+
+```bash
+ollama serve
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.2:latest
+```
+
+When `OLLAMA_HOST` is `localhost`, `127.0.0.1`, or `[::1]`, the backend calls Ollama without requiring `OLLAMA_API_KEY`. The optional `OLLAMA_MODEL` value controls the backend's default model for local generation. The `/api/meta/models` endpoint will also try to read live model names from local Ollama's `/api/tags` endpoint.
+
 For local React development, create a local `.env` only if the frontend needs to call a separate backend:
 
 ```bash
@@ -179,5 +189,5 @@ The production build may show an existing React hook dependency warning in `src/
 ## Notes
 
 - Keep `node_modules`, `build`, `.wrangler`, local `.env` files, Playwright scratch files, and generated presentation outputs out of git.
-- The backend is designed to prefer selected Ollama Cloud models where configured.
+- The backend is designed to prefer the selected Ollama model, including local Ollama models when `OLLAMA_HOST` points at a local server.
 - OCR quality depends on image clarity, lighting, and the availability of Cloudflare AI OCR support.

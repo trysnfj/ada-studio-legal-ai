@@ -126,3 +126,40 @@ describe("Camera Document AI", () => {
     expect(tools).toContain("setCapturedText(e.target.value)");
   });
 });
+
+describe("Local development startup", () => {
+  test("auth falls back to a local guest when the API is unavailable", () => {
+    const auth = fs.readFileSync(path.join(root, "src/lib/auth.jsx"), "utf8");
+    expect(auth).toContain("startLocalGuestSession");
+    expect(auth).toContain("local_guest");
+    expect(auth).toContain("guest@local.ada");
+  });
+
+  test("Studio boot calls do not throw when metadata or app APIs are offline", () => {
+    const tools = fs.readFileSync(path.join(root, "src/pages/Tools.jsx"), "utf8");
+    expect(tools).toContain("FALLBACK_MODELS");
+    expect(tools).toContain(".catch(() => setModels(FALLBACK_MODELS))");
+    expect(tools).toContain(".catch(() => setApps([]))");
+  });
+});
+
+describe("Local Ollama backend configuration", () => {
+  test("backend allows localhost Ollama without an API key", () => {
+    const worker = fs.readFileSync(path.resolve(root, "cloudflare/_worker.js"), "utf8");
+    expect(worker).toContain("isLocalOllamaHost");
+    expect(worker).toContain("canUseOllama");
+    expect(worker).toContain("ollamaHeaders");
+    expect(worker).toContain("defaultOllamaModel");
+    expect(worker).toContain("OLLAMA_MODEL");
+    expect(worker).toContain("127\\.0\\.0\\.1");
+    expect(worker).toContain("availableOllamaModels");
+    expect(worker).toContain("/api/tags");
+  });
+
+  test("backend exposes local Ollama models in the model selector list", () => {
+    const worker = fs.readFileSync(path.resolve(root, "cloudflare/_worker.js"), "utf8");
+    expect(worker).toContain('id: "llama3.2:latest"');
+    expect(worker).toContain('label: "Local Ollama');
+    expect(worker).toContain("ollama_local");
+  });
+});

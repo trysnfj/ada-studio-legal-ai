@@ -50,6 +50,10 @@ const STUDIO_TABS = [
   { id: "drafting-tool", label: "Drafting Tool", icon: FileSignature },
 ];
 
+const FALLBACK_MODELS = [
+  { id: "gpt-oss:120b-cloud", label: "Ollama Cloud · GPT-OSS 120B" },
+];
+
 const FEATURE_BLOCKS = [
   { id: "rag", label: "RAG", desc: "Upload, chunk, index, and cite matter documents.", icon: FileText },
   { id: "caselaw", label: "Case Law", desc: "Search UK judgments and pin authorities.", icon: Scale },
@@ -317,7 +321,10 @@ function AppsPanel({ onCreate }) {
 
   const refresh = () => {
     setLoading(true);
-    api.get("/apps").then((r) => setApps(r.data)).finally(() => setLoading(false));
+    api.get("/apps")
+      .then((r) => setApps(r.data))
+      .catch(() => setApps([]))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { refresh(); }, []);
@@ -2024,7 +2031,9 @@ export default function Tools() {
   const [models, setModels] = useState([]);
 
   useEffect(() => {
-    api.get("/meta/models").then((r) => setModels(r.data.models));
+    api.get("/meta/models")
+      .then((r) => setModels(r.data.models))
+      .catch(() => setModels(FALLBACK_MODELS));
   }, []);
 
   useEffect(() => {

@@ -22,6 +22,9 @@ const APP_TYPES = {
 };
 
 const OLLAMA_MODELS = [
+  { id: "llama3.2:latest", label: "Local Ollama · Llama 3.2" },
+  { id: "nadiacd96/HIHI:latest", label: "Local Ollama · HIHI" },
+  { id: "gemma4:latest", label: "Local Ollama · Gemma 4" },
   { id: "gpt-oss:120b-cloud", label: "Ollama Cloud · GPT-OSS 120B" },
   { id: "gpt-oss:20b-cloud", label: "Ollama Cloud · GPT-OSS 20B" },
   { id: "kimi-k2.7-code:cloud", label: "Ollama Cloud · Kimi K2.7 Code" },
@@ -493,9 +496,65 @@ function aiTextFromResult(result) {
   return "";
 }
 
-function selectedOllamaModel(app) {
-  const model = String(app?.model || DEFAULT_OLLAMA_MODEL);
-  return OLLAMA_MODELS.some((item) => item.id === model) ? model : DEFAULT_OLLAMA_MODEL;
+function defaultOllamaModel(env) {
+  const model = String(env?.OLLAMA_MODEL || DEFAULT_OLLAMA_MODEL);
+  return /^[A-Za-z0-9_.:/-]{1,120}$/.test(model) ? model : DEFAULT_OLLAMA_MODEL;
+}
+
+function selectedOllamaModel(app, env) {
+  const model = String(app?.model || defaultOllamaModel(env));
+  if (OLLAMA_MODELS.some((item) => item.id === model)) return model;
+  return /^[A-Za-z0-9_.:/-]{1,120}$/.test(model) ? model : defaultOllamaModel(env);
+}
+
+function ollamaHost(env) {
+  return String(env.OLLAMA_HOST || "https://ollama.com").replace(/\/+$/, "");
+}
+
+function isLocalOllamaHost(host) {
+  return /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(String(host || ""));
+}
+
+function canUseOllama(env) {
+  const host = ollamaHost(env);
+  return Boolean(env.OLLAMA_API_KEY || isLocalOllamaHost(host));
+}
+
+function ollamaHeaders(env) {
+  const headers = { "Content-Type": "application/json" };
+  if (env.OLLAMA_API_KEY) headers.Authorization = `Bearer ${env.OLLAMA_API_KEY}`;
+  return headers;
+}
+
+function ollamaStatus(env, suffix = "") {
+  const local = isLocalOllamaHost(ollamaHost(env));
+  return `${local ? "ollama_local" : "ollama_cloud"}${suffix}`;
+}
+
+async function availableOllamaModels(env) {
+  const host = ollamaHost(env);
+  if (!isLocalOllamaHost(host)) return OLLAMA_MODELS;
+  try {
+    const response = await fetch(`${host}/api/tags`, { headers: ollamaHeaders(env) });
+    if (!response.ok) return OLLAMA_MODELS;
+    const data = await response.json();
+    const localModels = Array.isArray(data.models)
+      ? data.models.map((item) => {
+        const id = item.model || item.name;
+        if (!id) return null;
+        const cloud = /:cloud$|-cloud$/.test(id);
+        return { id, label: `${cloud ? "Ollama Cloud" : "Local Ollama"} · ${id}` };
+      }).filter(Boolean)
+      : [];
+    const seen = new Set();
+    return [...localModels, ...OLLAMA_MODELS].filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  } catch {
+    return OLLAMA_MODELS;
+  }
 }
 
 function assistantMessages(app, question, citations) {
@@ -522,17 +581,13 @@ function assistantMessages(app, question, citations) {
 }
 
 async function answerWithOllamaCloud(env, app, question, citations) {
-  const apiKey = env.OLLAMA_API_KEY;
-  if (!apiKey) return null;
-  const model = selectedOllamaModel(app);
-  const host = String(env.OLLAMA_HOST || "https://ollama.com").replace(/\/+$/, "");
+  if (!canUseOllama(env)) return null;
+  const model = selectedOllamaModel(app, env);
+  const host = ollamaHost(env);
   try {
     const response = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: ollamaHeaders(env),
       body: JSON.stringify({
         model,
         messages: assistantMessages(app, question, citations),
@@ -545,7 +600,7 @@ async function answerWithOllamaCloud(env, app, question, citations) {
       return null;
     }
     const answer = cleanToolAnswer(aiTextFromResult(await response.json()));
-    return answer && !looksLikePlanningText(answer) ? { answer: withDisclaimer(answer), model, status: "ollama_cloud" } : null;
+    return answer && !looksLikePlanningText(answer) ? { answer: withDisclaimer(answer), model, status: ollamaStatus(env) } : null;
   } catch (err) {
     console.log(JSON.stringify({ event: "ollama_cloud_failed", message: err?.message || String(err) }));
     return null;
@@ -665,17 +720,13 @@ async function readAiTextStream(stream, onDelta) {
 }
 
 async function answerWithOllamaCloudStream(env, app, question, citations, onDelta) {
-  const apiKey = env.OLLAMA_API_KEY;
-  if (!apiKey) return null;
-  const model = selectedOllamaModel(app);
-  const host = String(env.OLLAMA_HOST || "https://ollama.com").replace(/\/+$/, "");
+  if (!canUseOllama(env)) return null;
+  const model = selectedOllamaModel(app, env);
+  const host = ollamaHost(env);
   try {
     const response = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: ollamaHeaders(env),
       body: JSON.stringify({
         model,
         messages: assistantMessages(app, question, citations),
@@ -716,7 +767,7 @@ async function answerWithOllamaCloudStream(env, app, question, citations, onDelt
     if (!cleaned || looksLikePlanningText(cleaned)) return null;
     const suffix = cleaned.includes(DISCLAIMER) ? "" : `\n\n${DISCLAIMER}`;
     if (suffix) onDelta(suffix);
-    return { answer: `${cleaned}${suffix}`, model, status: "ollama_cloud_stream" };
+    return { answer: `${cleaned}${suffix}`, model, status: ollamaStatus(env, "_stream") };
   } catch (err) {
     console.log(JSON.stringify({ event: "ollama_cloud_stream_failed", message: err?.message || String(err) }));
     return null;
@@ -743,17 +794,14 @@ function toolMessages(system, userMessage) {
 }
 
 async function generateToolAnswerWithOllamaCloud(env, requestedModel, system, userMessage, maxTokens = 1200) {
-  if (!env.OLLAMA_API_KEY) return null;
-  const model = selectedOllamaModel({ model: requestedModel });
-  const host = String(env.OLLAMA_HOST || "https://ollama.com").replace(/\/+$/, "");
+  if (!canUseOllama(env)) return null;
+  const model = selectedOllamaModel({ model: requestedModel }, env);
+  const host = ollamaHost(env);
   const outputTokens = normalizeMaxTokens(maxTokens);
   try {
     const response = await fetch(`${host}/api/chat`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.OLLAMA_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: ollamaHeaders(env),
       body: JSON.stringify({
         model,
         messages: toolMessages(system, userMessage),
@@ -766,7 +814,7 @@ async function generateToolAnswerWithOllamaCloud(env, requestedModel, system, us
       return null;
     }
     const answer = cleanAssistantAnswer(aiTextFromResult(await response.json()));
-    return answer && !looksLikePlanningText(answer) ? { answer: withDisclaimer(answer), model, status: "ollama_cloud" } : null;
+    return answer && !looksLikePlanningText(answer) ? { answer: withDisclaimer(answer), model, status: ollamaStatus(env) } : null;
   } catch (err) {
     console.log(JSON.stringify({ event: "tool_ollama_cloud_failed", message: err?.message || String(err) }));
     return null;
@@ -1105,7 +1153,7 @@ function streamRun(env, user, appId, app, question) {
         }
         send("citations", { citations });
         send("status", {
-          message: `Trying Ollama Cloud (${selectedOllamaModel(app)})`,
+          message: `Trying Ollama (${selectedOllamaModel(app, env)})`,
           step: "answer",
         });
 
@@ -1120,7 +1168,7 @@ function streamRun(env, user, appId, app, question) {
             streamedAnswer = "";
             send("replace", { answer: "" });
           }
-          send("status", { message: `Retrying Ollama Cloud (${selectedOllamaModel(app)})`, step: "answer" });
+          send("status", { message: `Retrying Ollama (${selectedOllamaModel(app, env)})`, step: "answer" });
           aiResult = await answerWithOllamaCloud(env, app, question, citations);
           if (aiResult?.answer) {
             await streamChunkedAnswer(aiResult.answer, (delta) => {
@@ -1150,8 +1198,8 @@ function streamRun(env, user, appId, app, question) {
           question,
           answer: aiResult?.answer || streamedAnswer,
           citations,
-          requested_model: app.model || DEFAULT_OLLAMA_MODEL,
-          model: aiResult?.model || app.model || DEFAULT_OLLAMA_MODEL,
+          requested_model: app.model || defaultOllamaModel(env),
+          model: aiResult?.model || app.model || defaultOllamaModel(env),
           model_status: aiResult?.status || "source_only_no_llm",
           started_at: startedAt,
           finished_at: nowIso(),
@@ -2835,7 +2883,7 @@ function titleFromDescription(description, appType) {
   return words ? words.replace(/[^\w\s&-]/g, "").replace(/\b\w/g, (ch) => ch.toUpperCase()).slice(0, 72) : fallback;
 }
 
-function fallbackAppConfig(description, modules) {
+function fallbackAppConfig(description, modules, env) {
   const app_type = inferAppTypeFromDescription(description, modules);
   const features = selectedFeatureLabels(modules);
   return {
@@ -2845,7 +2893,7 @@ function fallbackAppConfig(description, modules) {
     system_instructions: `You are a careful UK legal assistant configured for: ${description || APP_TYPES[app_type].label}. Use these enabled capabilities where relevant: ${features || "document review"}. Ground document answers in uploaded sources, avoid fabricating law or facts, and preserve uncertainty.`,
     output_format: APP_TYPES[app_type]?.default_format || "Markdown with clear headings, citations, assumptions, and next steps.",
     safety_rules: "State that the output is legal information, not legal advice. Flag uncertainty and cite sources where available.",
-    model: DEFAULT_OLLAMA_MODEL,
+    model: defaultOllamaModel(env),
     modules,
   };
 }
@@ -2862,8 +2910,8 @@ function extractJsonObject(text) {
   }
 }
 
-function sanitizeAppConfig(value, description, modules) {
-  const fallback = fallbackAppConfig(description, modules);
+function sanitizeAppConfig(value, description, modules, env) {
+  const fallback = fallbackAppConfig(description, modules, env);
   const raw = value && typeof value === "object" ? value : {};
   const app_type = APP_TYPES[raw.app_type] ? raw.app_type : fallback.app_type;
   return {
@@ -2873,7 +2921,7 @@ function sanitizeAppConfig(value, description, modules) {
     system_instructions: String(raw.system_instructions || fallback.system_instructions).trim().slice(0, 2500),
     output_format: String(raw.output_format || APP_TYPES[app_type]?.default_format || fallback.output_format).trim().slice(0, 1200),
     safety_rules: String(raw.safety_rules || fallback.safety_rules).trim().slice(0, 1200),
-    model: OLLAMA_MODELS.some((model) => model.id === raw.model) ? raw.model : DEFAULT_OLLAMA_MODEL,
+    model: selectedOllamaModel({ model: raw.model }, env),
     modules,
   };
 }
@@ -2901,16 +2949,13 @@ function appConfigMessages(description, modules) {
 }
 
 async function generateConfigWithOllamaCloud(env, description, modules) {
-  if (!env.OLLAMA_API_KEY) return null;
+  if (!canUseOllama(env)) return null;
   try {
-    const response = await fetch(`${String(env.OLLAMA_HOST || "https://ollama.com").replace(/\/+$/, "")}/api/chat`, {
+    const response = await fetch(`${ollamaHost(env)}/api/chat`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.OLLAMA_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: ollamaHeaders(env),
       body: JSON.stringify({
-        model: DEFAULT_OLLAMA_MODEL,
+        model: defaultOllamaModel(env),
         messages: appConfigMessages(description, modules),
         stream: false,
         options: { temperature: 0.15, num_predict: 900 },
@@ -2926,7 +2971,7 @@ async function generateConfigWithOllamaCloud(env, description, modules) {
 async function generateAppConfig(env, description, modules) {
   const generated = await generateConfigWithOllamaCloud(env, description, modules);
   return {
-    config: sanitizeAppConfig(generated, description, modules),
+    config: sanitizeAppConfig(generated, description, modules, env),
     generated_by: generated ? "llm" : "fallback",
   };
 }
@@ -2939,7 +2984,7 @@ async function handleApi(request, env) {
   if (method === "OPTIONS") return new Response(null, { status: 204 });
 
   if (method === "GET" && path === "/meta/models") {
-    return json({ models: OLLAMA_MODELS, app_types: Object.entries(APP_TYPES).map(([id, config]) => ({ id, ...config })) });
+    return json({ models: await availableOllamaModels(env), app_types: Object.entries(APP_TYPES).map(([id, config]) => ({ id, ...config })) });
   }
 
   if (method === "POST" && path === "/auth/guest") {
@@ -3250,8 +3295,8 @@ async function handleApi(request, env) {
         question,
         answer,
         citations,
-        requested_model: app.model || DEFAULT_OLLAMA_MODEL,
-        model: aiResult?.model || app.model || DEFAULT_OLLAMA_MODEL,
+        requested_model: app.model || defaultOllamaModel(env),
+        model: aiResult?.model || app.model || defaultOllamaModel(env),
         model_status: aiResult?.status || "source_only_no_llm",
         started_at: nowIso(),
         finished_at: nowIso(),
@@ -3263,7 +3308,7 @@ async function handleApi(request, env) {
       if (!normalizeCaseLawSourceUrl(body.url) && !normalizeCaseLawSourceUrl(body.bailii_url) && !normalizeExtractedText(body.title)) {
         return error(422, "Case title or source URL is required.");
       }
-      const summary = await summariseCaseLaw(env, body, app.model || DEFAULT_OLLAMA_MODEL, { mode: "detailed", maxTokens: 1600 });
+      const summary = await summariseCaseLaw(env, body, app.model || defaultOllamaModel(env), { mode: "detailed", maxTokens: 1600 });
       return json({
         run_id: id("run"),
         app_id: appId,
@@ -3271,7 +3316,7 @@ async function handleApi(request, env) {
         question: normalizeExtractedText(body.question || `Summarise ${body.title || body.neutral_citation || "this case"}`),
         answer: summary.answer,
         citations: [summary.citation],
-        requested_model: app.model || DEFAULT_OLLAMA_MODEL,
+        requested_model: app.model || defaultOllamaModel(env),
         model: summary.model,
         model_status: summary.status,
         source_status: summary.source.status,
