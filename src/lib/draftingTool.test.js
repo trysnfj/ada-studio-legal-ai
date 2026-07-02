@@ -192,6 +192,10 @@ describe("Mini Model Lab", () => {
     expect(tools).toContain("makeTrainingExamples");
     expect(tools).toContain("trainNgramModel");
     expect(tools).toContain("generateFromMiniModel");
+    expect(tools).toContain("MINI_MODEL_LEGAL_DATASET");
+    expect(tools).toContain("MINI_MODEL_TEST_PROMPTS");
+    expect(tools).toContain('data-testid="mini-model-load-legal-dataset"');
+    expect(tools).toContain('data-testid="mini-model-test-prompts"');
     expect(tools).toContain('data-testid="mini-model-export-jsonl"');
     expect(tools).toContain('data-testid="mini-model-train"');
     expect(tools).toContain('data-testid="mini-model-chat-thread"');

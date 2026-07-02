@@ -1094,6 +1094,79 @@ export function CameraTool({ standalone = false }) {
 
 const MINI_MODEL_SAMPLE = `The client says the supplier missed the delivery deadline and caused additional storage costs. The contract requires written notice before termination. The next step is to check the notice clause, preserve correspondence, and calculate the losses.`;
 
+const MINI_MODEL_LEGAL_DATASET = `Training note: This is a synthetic legal assistant dataset for a tiny browser n-gram model. It repeats stable legal workflow patterns so the model can be tested in the playground.
+
+User prompt: Summarise this contract issue.
+Assistant response: Summary: the supplier missed a delivery deadline and the client may have storage costs. Important information: check the delivery clause, notice clause, limitation clause, and evidence of loss. Suggested next steps: preserve emails, calculate losses, send a notice reserving rights, and review whether termination is available.
+
+User prompt: What should I check next after a late delivery?
+Assistant response: Next steps: check the contract deadline, check whether time is of the essence, check notice requirements, collect delivery records, calculate direct losses, and avoid termination until the notice position is clear.
+
+User prompt: Create a short chronology.
+Assistant response: Chronology: first identify the contract date, then the promised delivery date, then any variation, then the missed deadline, then complaints, then remedial offers, then current losses. Each event should include date, source, event, and significance.
+
+User prompt: Analyse captured document wording.
+Assistant response: Summary: the captured wording appears to describe a legal or business document. Important information: identify the parties, date, obligations, deadlines, payment terms, termination rights, and signatures. Suggested next steps: correct OCR errors, compare the wording with the original document, and ask a focused question about risk.
+
+User prompt: What are the risks in a notice clause?
+Assistant response: Risks: the notice clause may require a specific address, service method, recipient, time period, and proof of delivery. If notice is defective, the client may lose the right to terminate or claim a remedy. Next step: check the clause against the proposed notice.
+
+User prompt: Draft a polite response letter.
+Assistant response: Response structure: address block, date, reference line, subject line, opening, background, response to allegations, documents requested, reservation of rights, deadline for reply, closing, and sign off. Tone: professional, clear, and firm.
+
+User prompt: Draft a letter of claim checklist.
+Assistant response: Letter of claim checklist: parties, background, chronology, basis of claim, documents relied on, losses or remedy sought, required response, deadline, next steps, and reservation of rights. The letter should avoid unsupported allegations.
+
+User prompt: Summarise a settlement proposal.
+Assistant response: Summary: identify the offer amount, payment date, confidentiality wording, release scope, costs position, and whether the offer is open or without prejudice. Suggested next steps: compare the offer with estimated claim value and ask for clarification before acceptance.
+
+User prompt: Compare two contract versions.
+Assistant response: Comparison method: review changed clauses side by side, identify new obligations, deleted protections, changed deadlines, wider indemnities, weaker termination rights, and changes to governing law. Output should include issue, version A, version B, risk, and action.
+
+User prompt: Identify useful case law notes.
+Assistant response: Case law note: capture the citation, court, date, legal issue, material facts, principle, outcome, and relevance to the matter. Do not rely on a summary without checking the judgment.
+
+User prompt: What should a RAG answer include?
+Assistant response: A RAG answer should include a direct answer, source-grounded reasoning, citations to document sections, limits of the source material, and suggested follow-up questions. If the documents do not contain the answer, say so clearly.
+
+User prompt: How should I save a matter note?
+Assistant response: Save the note with a clear title, matter reference, folder, source type, extracted text, AI summary, important dates, risks, and next steps. This makes later review and bundle export easier.
+
+User prompt: Analyse an indemnity clause.
+Assistant response: Summary: the indemnity may shift risk from one party to another. Important checks: trigger events, covered losses, exclusions, mitigation, liability cap, notice requirements, conduct of claims, and whether the indemnity is mutual.
+
+User prompt: Analyse a limitation clause.
+Assistant response: Summary: the limitation clause may cap financial exposure. Important checks: cap amount, excluded losses, carve-outs, fraud, death or personal injury, indemnities, data loss, and whether the cap is reasonable and commercially acceptable.
+
+User prompt: Analyse termination rights.
+Assistant response: Summary: termination rights determine when the contract can end. Important checks: termination for convenience, breach cure period, insolvency, non-payment, notice method, consequences of termination, accrued rights, and survival clauses.
+
+User prompt: Build a next steps list.
+Assistant response: Suggested next steps: verify facts, check the source document, identify deadlines, preserve evidence, draft a short chronology, calculate loss, ask for missing documents, and prepare a proportionate response.
+
+User prompt: What should I ask the client?
+Assistant response: Client questions: when did the issue begin, who was involved, what documents exist, what deadline applies, what loss has been suffered, what remedy is wanted, and whether any admission or settlement offer has been made.
+
+User prompt: Prepare a document review output.
+Assistant response: Output format: Summary, Important Information, Key Risks, Missing Information, Suggested Next Steps, Follow-up Questions, and Limits. Keep the wording practical and source-grounded.
+
+Test prompt: What should I check next?
+Expected behaviour: the model should mention checking clauses, deadlines, evidence, losses, notice, and next steps.
+
+Test prompt: Summarise this contract issue.
+Expected behaviour: the model should produce summary style wording with important information and suggested next steps.
+
+Test prompt: Draft a letter of claim checklist.
+Expected behaviour: the model should mention parties, background, chronology, basis of claim, remedy, deadline, and reservation of rights.`;
+
+const MINI_MODEL_TEST_PROMPTS = [
+  "What should I check next?",
+  "Summarise this contract issue.",
+  "Draft a letter of claim checklist.",
+  "Analyse captured document wording.",
+  "Compare two contract versions.",
+];
+
 function tokenizeModelText(value) {
   return String(value || "").toLowerCase().match(/[a-z0-9']+|[.,;:!?]/g) || [];
 }
@@ -1225,6 +1298,19 @@ function MiniModelLab() {
     setModel(null);
     setSample("");
     setChatMessages([]);
+  };
+
+  const loadLegalDataset = () => {
+    setName("Legal workflow n-gram model");
+    setDescription("Synthetic legal workflow dataset optimised for testing the browser n-gram playground.");
+    setSourceText(MINI_MODEL_LEGAL_DATASET);
+    setSeed(MINI_MODEL_TEST_PROMPTS[0]);
+    setChatPrompt(MINI_MODEL_TEST_PROMPTS[0]);
+    setDataset([]);
+    setModel(null);
+    setSample("");
+    setChatMessages([]);
+    toast.success("Loaded legal workflow training dataset");
   };
 
   const prepareDataset = () => {
@@ -1389,6 +1475,9 @@ function MiniModelLab() {
               <Upload size={13} /> Upload .txt/.md/.jsonl
               <input type="file" accept=".txt,.md,.json,.jsonl,text/plain,application/json" hidden onChange={(e) => loadTrainingFile(e.target.files?.[0])} />
             </label>
+            <button onClick={loadLegalDataset} className="bg-klein text-white px-3 py-2 hover:bg-ink text-xs inline-flex items-center gap-2" data-testid="mini-model-load-legal-dataset">
+              <Sparkles size={13} /> Load legal n-gram dataset
+            </button>
             <button onClick={() => setSourceText(MINI_MODEL_SAMPLE)} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Load sample</button>
             <button onClick={() => { setSourceText(""); setDataset([]); setModel(null); setSample(""); setChatMessages([]); }} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Clear</button>
           </div>
@@ -1475,6 +1564,18 @@ function MiniModelLab() {
               </div>
 
               <div className="mt-3 border border-gray-300 bg-white p-2">
+                <div className="flex flex-wrap gap-2 px-2 pt-1 pb-2" data-testid="mini-model-test-prompts">
+                  {MINI_MODEL_TEST_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      onClick={() => setChatPrompt(prompt)}
+                      className="border border-gray-200 px-2.5 py-1.5 text-[11px] hover:border-ink hover:bg-gray-50"
+                      data-testid={`mini-model-test-prompt-${fileSlug(prompt)}`}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   value={chatPrompt}
                   onChange={(e) => setChatPrompt(e.target.value)}
