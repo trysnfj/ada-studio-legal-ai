@@ -194,6 +194,10 @@ describe("Mini Model Lab", () => {
     expect(tools).toContain("generateFromMiniModel");
     expect(tools).toContain('data-testid="mini-model-export-jsonl"');
     expect(tools).toContain('data-testid="mini-model-train"');
+    expect(tools).toContain('data-testid="mini-model-chat-thread"');
+    expect(tools).toContain('data-testid="mini-model-chat-input"');
+    expect(tools).toContain('data-testid="mini-model-chat-send"');
+    expect(tools).toContain('data-testid="mini-model-save-playground"');
   });
 
   test("saves mini model records through Cloudflare KV routes", () => {
@@ -202,5 +206,6 @@ describe("Mini Model Lab", () => {
     expect(worker).toContain("normalizeMiniModelRecord");
     expect(worker).toContain("mini-model:${user.user_id}");
     expect(worker).toContain("model_lab");
+    expect(worker).toContain("chat_messages");
   });
 });

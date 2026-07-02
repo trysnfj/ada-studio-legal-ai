@@ -1190,6 +1190,8 @@ function MiniModelLab() {
   const [model, setModel] = useState(null);
   const [seed, setSeed] = useState("The next step is");
   const [sample, setSample] = useState("");
+  const [chatPrompt, setChatPrompt] = useState("What should I check next?");
+  const [chatMessages, setChatMessages] = useState([]);
   const [savedModels, setSavedModels] = useState([]);
   const [busy, setBusy] = useState(false);
 
@@ -1222,6 +1224,7 @@ function MiniModelLab() {
     setDataset([]);
     setModel(null);
     setSample("");
+    setChatMessages([]);
   };
 
   const prepareDataset = () => {
@@ -1241,8 +1244,37 @@ function MiniModelLab() {
       return;
     }
     setModel(trained);
-    setSample(generateFromMiniModel(trained, seed));
+    const firstSample = generateFromMiniModel(trained, seed);
+    setSample(firstSample);
+    setChatMessages([
+      {
+        role: "assistant",
+        content: `Model trained in the browser from ${trained.token_count.toLocaleString()} tokens and ${trained.vocabulary_size.toLocaleString()} unique terms. Ask a prompt below to test it.`,
+      },
+      { role: "assistant", content: firstSample },
+    ]);
     toast.success("Tiny browser model trained");
+  };
+
+  const askMiniModel = () => {
+    const prompt = chatPrompt.trim();
+    if (!prompt) {
+      toast.error("Enter a prompt to test the trained model");
+      return;
+    }
+    if (!model?.transitions) {
+      toast.error("Train or load a browser model before chatting");
+      return;
+    }
+    const answer = generateFromMiniModel(model, prompt, 120) || "The mini model could not generate a response from that prompt. Try a phrase closer to the training text.";
+    setSeed(prompt);
+    setSample(answer);
+    setChatMessages((current) => [
+      ...current,
+      { role: "user", content: prompt },
+      { role: "assistant", content: answer },
+    ]);
+    setChatPrompt("");
   };
 
   const exportJsonl = () => {
@@ -1287,6 +1319,7 @@ function MiniModelLab() {
         jsonl: examples.map((example) => JSON.stringify({ messages: example.messages })).join("\n"),
         stats,
         model_data: model,
+        chat_messages: chatMessages,
       });
       setSavedModels((current) => [data, ...current.filter((item) => item.model_id !== data.model_id)]);
       toast.success("Saved mini model");
@@ -1303,7 +1336,11 @@ function MiniModelLab() {
     setSourceText(record.source_text || "");
     setDataset(makeTrainingExamples(record.source_text || ""));
     setModel(record.model_data || null);
-    setSample(record.model_data ? generateFromMiniModel(record.model_data, seed) : "");
+    const loadedSample = record.model_data?.transitions ? generateFromMiniModel(record.model_data, seed) : "";
+    setSample(loadedSample);
+    setChatMessages(Array.isArray(record.chat_messages) && record.chat_messages.length
+      ? record.chat_messages
+      : record.model_data ? [{ role: "assistant", content: `Loaded ${record.name || "saved mini model"}. Ask a prompt to test it.` }] : []);
   };
 
   const deleteSavedModel = async (modelId) => {
@@ -1353,7 +1390,7 @@ function MiniModelLab() {
               <input type="file" accept=".txt,.md,.json,.jsonl,text/plain,application/json" hidden onChange={(e) => loadTrainingFile(e.target.files?.[0])} />
             </label>
             <button onClick={() => setSourceText(MINI_MODEL_SAMPLE)} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Load sample</button>
-            <button onClick={() => setSourceText("")} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Clear</button>
+            <button onClick={() => { setSourceText(""); setDataset([]); setModel(null); setSample(""); setChatMessages([]); }} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Clear</button>
           </div>
           <textarea
             value={sourceText}
@@ -1362,6 +1399,7 @@ function MiniModelLab() {
               setDataset([]);
               setModel(null);
               setSample("");
+              setChatMessages([]);
             }}
             rows={14}
             placeholder="Paste source text, notes, clauses, correspondence, or JSONL training material."
@@ -1401,14 +1439,67 @@ function MiniModelLab() {
         </section>
 
         <aside className="lg:col-span-5 space-y-5">
-          <section className="border border-gray-200 p-4" data-testid="mini-model-generator">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 mb-2">Generation test</div>
-            <input value={seed} onChange={(e) => setSeed(e.target.value)} className="w-full border border-gray-300 px-3 py-2.5 text-sm mb-3" data-testid="mini-model-seed" />
-            <button onClick={() => setSample(generateFromMiniModel(model, seed))} disabled={!model} className="bg-ink text-white px-4 py-2.5 hover:bg-klein text-sm disabled:opacity-50 inline-flex items-center gap-2" data-testid="mini-model-generate">
-              <Sparkles size={14} /> Generate sample
-            </button>
-            <div className="mt-3 border border-gray-200 bg-gray-50 p-3 min-h-[120px] text-sm whitespace-pre-wrap leading-relaxed" data-testid="mini-model-sample">
-              {sample || "Train the browser model, then generate a short sample from your seed phrase."}
+          <section className="border border-gray-200" data-testid="mini-model-generator">
+            <div className="border-b border-gray-200 p-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 mb-1">Model playground</div>
+                <h3 className="font-serif text-2xl leading-tight">Test your trained model</h3>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className={`font-mono text-[10px] uppercase tracking-widest px-2 py-1 border ${model?.transitions ? "border-klein text-klein bg-klein-bg" : "border-gray-200 text-gray-500 bg-gray-50"}`} data-testid="mini-model-status">
+                    {model?.transitions ? "Ready to chat" : "Train a model first"}
+                  </span>
+                  {model?.token_count ? <span className="font-mono text-[10px] uppercase tracking-widest px-2 py-1 border border-gray-200 text-gray-500">{model.token_count.toLocaleString()} tokens</span> : null}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setChatMessages([])} disabled={!chatMessages.length} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs disabled:opacity-50" data-testid="mini-model-clear-chat">Clear</button>
+                <button onClick={saveModel} disabled={busy || !model} className="bg-ink text-white px-3 py-2 hover:bg-klein text-xs disabled:opacity-50 inline-flex items-center gap-2" data-testid="mini-model-save-playground">
+                  <Save size={13} /> {busy ? "Saving..." : "Save model"}
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4">
+              <div className="border border-gray-200 bg-gray-50 min-h-[300px] max-h-[420px] overflow-auto p-3 space-y-3" data-testid="mini-model-chat-thread">
+                {chatMessages.length === 0 ? (
+                  <div className="h-[260px] flex items-center justify-center text-center text-sm text-gray-500 px-6">
+                    Train the browser model, then use this chat-style playground to test prompts and save the working model.
+                  </div>
+                ) : chatMessages.map((message, index) => (
+                  <div key={`${message.role}-${index}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[88%] border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${message.role === "user" ? "bg-ink text-white border-ink" : "bg-white text-ink border-gray-200"}`} data-testid={`mini-model-message-${message.role}`}>
+                      {message.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3 border border-gray-300 bg-white p-2">
+                <textarea
+                  value={chatPrompt}
+                  onChange={(e) => setChatPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      askMiniModel();
+                    }
+                  }}
+                  rows={3}
+                  placeholder="Message your trained mini model..."
+                  className="w-full resize-none border-0 px-2 py-2 text-sm leading-relaxed focus:outline-none"
+                  data-testid="mini-model-chat-input"
+                />
+                <div className="flex items-center justify-between gap-3 border-t border-gray-100 pt-2">
+                  <div className="text-[11px] text-gray-500">Enter sends, Shift+Enter adds a line.</div>
+                  <button onClick={askMiniModel} disabled={!model?.transitions || !chatPrompt.trim()} className="bg-ink text-white px-4 py-2 hover:bg-klein text-sm disabled:opacity-50 inline-flex items-center gap-2" data-testid="mini-model-chat-send">
+                    <Send size={14} /> Send
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 border border-gray-200 bg-white p-3 text-sm whitespace-pre-wrap leading-relaxed" data-testid="mini-model-sample">
+                {sample || "The latest generated response will appear here after the model answers."}
+              </div>
             </div>
           </section>
 

@@ -1085,6 +1085,10 @@ function normalizeMiniModelRecord(user, body) {
     jsonl,
     stats,
     model_data: clampJsonValue(body.model_data || null, MAX_MINI_MODEL_DATA_CHARS),
+    chat_messages: Array.isArray(body.chat_messages) ? body.chat_messages.slice(0, 40).map((message) => ({
+      role: String(message.role || "assistant").trim() === "user" ? "user" : "assistant",
+      content: String(message.content || "").trim().slice(0, 4000),
+    })).filter((message) => message.content) : [],
     created_at: body.created_at || now,
     updated_at: now,
   };
