@@ -15,7 +15,7 @@ ADA Studio is a legal AI workspace for building and running source-grounded lega
 - Drafting Tool for legal correspondence, including letters of claim and settlement letters.
 - Chronology Builder for extracting dated matter events.
 - Compare tool for side-by-side document review.
-- Standalone Camera Document AI at `/camera` for photo OCR, summary, chat, and Word/PDF exports.
+- Standalone Camera Document AI at `/camera` for photo/screenshot OCR, source-type-aware summaries, chat, saved note folders, and Word/PDF exports.
 - Guided Reader with file upload, camera OCR, summary, chat, and document export.
 - Matter bundle and structured export support for Word, PDF, and PowerPoint-style outputs.
 

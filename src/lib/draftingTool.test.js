@@ -125,6 +125,20 @@ describe("Camera Document AI", () => {
     expect(tools).toContain('data-testid="camera-copy-text"');
     expect(tools).toContain("setCapturedText(e.target.value)");
   });
+
+  test("supports fast OCR-first analysis and saved camera note folders", () => {
+    const worker = fs.readFileSync(path.resolve(root, "cloudflare/_worker.js"), "utf8");
+    const tools = fs.readFileSync(path.join(root, "src/pages/Tools.jsx"), "utf8");
+    expect(worker).toContain('path === "/tools/camera-notes"');
+    expect(worker).toContain("normalizeCameraNote");
+    expect(worker).toContain("camera-note:${user.user_id}");
+    expect(worker).toContain("next_step: \"analysis_ready\"");
+    expect(tools).toContain("CAMERA_SOURCE_TYPES");
+    expect(tools).toContain("analyseTextValue(text)");
+    expect(tools).toContain('data-testid="camera-note-folder"');
+    expect(tools).toContain('data-testid="camera-save-note"');
+    expect(tools).toContain('data-testid="camera-saved-notes"');
+  });
 });
 
 describe("Local development startup", () => {

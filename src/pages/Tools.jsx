@@ -23,6 +23,7 @@ import {
   GitCompareArrows,
   GripVertical,
   Download,
+  FolderOpen,
   Mail,
   Pause,
   Pin,
@@ -31,6 +32,7 @@ import {
   Scale,
   Search,
   Send,
+  Save,
   Sparkles,
   Trash2,
   Upload,
@@ -52,6 +54,16 @@ const STUDIO_TABS = [
 
 const FALLBACK_MODELS = [
   { id: "gpt-oss:120b-cloud", label: "Ollama Cloud · GPT-OSS 120B" },
+];
+
+const CAMERA_SOURCE_TYPES = [
+  "Paper document",
+  "Online document / website",
+  "Slide deck notes",
+  "Handwritten notes",
+  "Whiteboard / classroom notes",
+  "Meeting notes",
+  "Other",
 ];
 
 const FEATURE_BLOCKS = [
@@ -647,13 +659,39 @@ export function CameraTool({ standalone = false }) {
   const [analysis, setAnalysis] = useState("");
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
+  const [sourceType, setSourceType] = useState(CAMERA_SOURCE_TYPES[0]);
+  const [folder, setFolder] = useState("General");
+  const [noteTitle, setNoteTitle] = useState("");
+  const [activeNoteId, setActiveNoteId] = useState("");
+  const [savedNotes, setSavedNotes] = useState([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
 
+  const savedFolders = useMemo(() => {
+    const names = savedNotes.map((note) => note.folder).filter(Boolean);
+    return Array.from(new Set(["General", ...names]));
+  }, [savedNotes]);
+
   useEffect(() => () => {
     if (imagePreview) URL.revokeObjectURL(imagePreview);
   }, [imagePreview]);
+
+  const refreshSavedNotes = async () => {
+    setNotesLoading(true);
+    try {
+      const { data } = await api.get("/tools/camera-notes");
+      setSavedNotes(Array.isArray(data) ? data : []);
+    } catch {
+      setSavedNotes([]);
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  useEffect(() => { refreshSavedNotes(); }, []);
 
   const prepareCameraImage = (sourceFile) => new Promise((resolve) => {
     const img = new Image();
@@ -687,8 +725,30 @@ export function CameraTool({ standalone = false }) {
     setAnalysis("");
     setQuestion("");
     setMessages([]);
+    setNoteTitle("");
+    setActiveNoteId("");
     if (cameraInputRef.current) cameraInputRef.current.value = "";
     if (photoInputRef.current) photoInputRef.current.value = "";
+  };
+
+  const analyseTextValue = async (textValue = capturedText) => {
+    const nextText = String(textValue || "").trim();
+    if (!nextText) {
+      toast.error("Capture or paste document wording first");
+      return "";
+    }
+    setAnalysisBusy(true);
+    try {
+      const { data } = await api.post("/tools/camera-analysis", { text: nextText, source_type: sourceType });
+      const nextAnalysis = data.analysis || "";
+      setAnalysis(nextAnalysis);
+      return nextAnalysis;
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Analysis failed");
+      return "";
+    } finally {
+      setAnalysisBusy(false);
+    }
   };
 
   const processPhoto = async (file) => {
@@ -708,9 +768,14 @@ export function CameraTool({ standalone = false }) {
       const fd = new FormData();
       fd.append("file", uploadFile);
       const { data } = await api.post("/tools/camera-ocr", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setCapturedText(data.text || "");
-      setAnalysis(data.analysis || "");
+      const text = data.text || "";
+      setCapturedText(text);
+      setNoteTitle((file.name || "Camera note").replace(/\.[^.]+$/, ""));
       toast.success(`Captured ${data.char_count || 0} characters from the photo`);
+      if (text.trim()) {
+        setAnalysis("Extracted text is ready. Generating summary, important information, next steps, and improvements...");
+        void analyseTextValue(text);
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Camera AI could not read this image");
     } finally {
@@ -721,19 +786,7 @@ export function CameraTool({ standalone = false }) {
   };
 
   const analyseCapturedText = async () => {
-    if (!capturedText.trim()) {
-      toast.error("Capture or paste document wording first");
-      return;
-    }
-    setAnalysisBusy(true);
-    try {
-      const { data } = await api.post("/tools/camera-analysis", { text: capturedText });
-      setAnalysis(data.analysis || "");
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Analysis failed");
-    } finally {
-      setAnalysisBusy(false);
-    }
+    await analyseTextValue(capturedText);
   };
 
   const askCameraQuestion = async () => {
@@ -782,6 +835,8 @@ export function CameraTool({ standalone = false }) {
       subtitle: "Standalone OCR capture, AI analysis, and document Q&A.",
       metadata: {
         "Source image": filename || "Manual text entry",
+        "Source type": sourceType,
+        "Folder": folder || "General",
         "Captured characters": capturedText.length.toLocaleString(),
         "Questions asked": messages.length,
         "Generated": new Date().toLocaleString(),
@@ -796,6 +851,59 @@ export function CameraTool({ standalone = false }) {
     }, format, `camera-document-ai-${baseName}`);
   };
 
+  const saveCameraNote = async () => {
+    if (!capturedText.trim() && !analysis.trim()) {
+      toast.error("Capture or analyse text before saving");
+      return;
+    }
+    setSaveBusy(true);
+    try {
+      const { data } = await api.post("/tools/camera-notes", {
+        note_id: activeNoteId,
+        title: noteTitle || filename || "Camera note",
+        folder: folder || "General",
+        source_type: sourceType,
+        filename,
+        captured_text: capturedText,
+        analysis,
+        messages,
+      });
+      setSavedNotes((current) => [data, ...current.filter((note) => note.note_id !== data.note_id)]);
+      setActiveNoteId(data.note_id || "");
+      setFolder(data.folder || "General");
+      setNoteTitle(data.title || "");
+      toast.success("Saved camera note");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Could not save note");
+    } finally {
+      setSaveBusy(false);
+    }
+  };
+
+  const loadCameraNote = (note) => {
+    clearCapture();
+    setFilename(note.filename || "");
+    setCapturedText(note.captured_text || "");
+    setAnalysis(note.analysis || "");
+    setMessages(Array.isArray(note.messages) ? note.messages : []);
+    setSourceType(note.source_type || CAMERA_SOURCE_TYPES[0]);
+    setFolder(note.folder || "General");
+    setNoteTitle(note.title || "");
+    setActiveNoteId(note.note_id || "");
+    toast.success("Loaded saved camera note");
+  };
+
+  const deleteCameraNote = async (noteId) => {
+    try {
+      await api.delete(`/tools/camera-notes/${noteId}`);
+      setSavedNotes((current) => current.filter((note) => note.note_id !== noteId));
+      if (activeNoteId === noteId) setActiveNoteId("");
+      toast.success("Deleted saved note");
+    } catch {
+      toast.error("Could not delete note");
+    }
+  };
+
   return (
     <section data-testid="camera-section">
       <div className="mb-6">
@@ -803,7 +911,7 @@ export function CameraTool({ standalone = false }) {
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-klein mb-2">{standalone ? "Standalone tool" : "Studio tool"}</div>
             <h2 className="font-serif text-3xl sm:text-4xl tracking-tight mb-2">Camera Document AI</h2>
-            <p className="text-sm text-gray-600 max-w-3xl">Take a photo of document wording, extract the text, generate a legal-focused summary, and ask follow-up questions without creating an app.</p>
+            <p className="text-sm text-gray-600 max-w-3xl">Take a photo of paper documents, online screens, slide-deck notes, handwritten notes, or whiteboards. ADA extracts the wording, summarises the important information, suggests next steps, and keeps chat available.</p>
           </div>
           {!standalone && (
             <Link to="/camera" className="border border-gray-300 px-4 py-2.5 hover:border-ink hover:bg-gray-50 transition-colors text-sm inline-flex items-center gap-2 w-fit" data-testid="camera-open-standalone">
@@ -818,9 +926,12 @@ export function CameraTool({ standalone = false }) {
         <div className="p-4 border-b border-gray-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-klein">Standalone capture</div>
-            <div className="text-sm text-gray-600">Use a camera photo or upload an existing image. The extracted text stays in this workspace unless you copy it elsewhere.</div>
+            <div className="text-sm text-gray-600">Use a camera photo, screenshot, or uploaded image. OCR appears first; AI analysis runs immediately after.</div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={sourceType} onChange={(e) => setSourceType(e.target.value)} className="border border-gray-300 px-3 py-2.5 text-sm bg-white" data-testid="camera-source-type">
+              {CAMERA_SOURCE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+            </select>
             <button onClick={() => cameraInputRef.current?.click()} disabled={ocrBusy} className="bg-ink text-white px-4 py-2.5 hover:bg-klein transition-colors text-sm disabled:opacity-50 inline-flex items-center gap-2" data-testid="camera-take-photo">
               <Camera size={14} /> Take photo
             </button>
@@ -839,7 +950,7 @@ export function CameraTool({ standalone = false }) {
 
         {ocrBusy && (
           <div className="border-b border-gray-200 p-4 font-mono text-[10px] uppercase tracking-widest text-klein animate-pulse" data-testid="camera-ocr-loading">
-            Extracting wording and preparing analysis...
+            Extracting wording...
           </div>
         )}
 
@@ -886,6 +997,9 @@ export function CameraTool({ standalone = false }) {
                 <div className="text-sm text-gray-600">Export the edited OCR text, analysis, and Q&A as a client-reviewable report.</div>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button onClick={saveCameraNote} disabled={saveBusy || (!capturedText.trim() && !analysis.trim())} className="bg-ink text-white px-3 py-2 hover:bg-klein text-xs disabled:opacity-50 inline-flex items-center gap-2" data-testid="camera-save-note">
+                  <Save size={13} /> {saveBusy ? "Saving..." : "Save note"}
+                </button>
                 <button onClick={() => downloadCameraReport("word")} disabled={!capturedText.trim() && !analysis.trim() && messages.length === 0} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs disabled:opacity-50 inline-flex items-center gap-2" data-testid="camera-download-word">
                   <Download size={13} /> Word
                 </button>
@@ -897,7 +1011,7 @@ export function CameraTool({ standalone = false }) {
             <div className="mb-5">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500">AI analysis</div>
-                {analysis && <span className="font-mono text-[10px] uppercase tracking-widest text-klein">Ready</span>}
+                {analysisBusy ? <span className="font-mono text-[10px] uppercase tracking-widest text-klein animate-pulse">Analysing</span> : analysis && <span className="font-mono text-[10px] uppercase tracking-widest text-klein">Ready</span>}
               </div>
               <div className="border border-gray-200 bg-gray-50 p-4 min-h-[180px] text-sm whitespace-pre-wrap leading-relaxed" data-testid="camera-analysis">
                 {analysis || <span className="text-gray-500">Capture a document photo to generate an analysis, or paste wording and press Analyse.</span>}
@@ -934,6 +1048,43 @@ export function CameraTool({ standalone = false }) {
             </div>
           </section>
         </div>
+
+        <section className="border-t border-gray-200 p-4" data-testid="camera-notes-panel">
+          <div className="grid lg:grid-cols-12 gap-4">
+            <div className="lg:col-span-5">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 mb-2">Save to folder</div>
+              <div className="grid sm:grid-cols-2 gap-2">
+                <input value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="Note title" className="border border-gray-300 px-3 py-2.5 text-sm focus:border-klein focus:outline-none" data-testid="camera-note-title" />
+                <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="Folder, e.g. Matter notes" list="camera-folders" className="border border-gray-300 px-3 py-2.5 text-sm focus:border-klein focus:outline-none" data-testid="camera-note-folder" />
+                <datalist id="camera-folders">
+                  {savedFolders.map((name) => <option key={name} value={name} />)}
+                </datalist>
+              </div>
+              <p className="text-xs text-gray-600 mt-2">Saved notes keep the OCR text, AI analysis, source type, and chat history together for later review.</p>
+            </div>
+            <div className="lg:col-span-7">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 inline-flex items-center gap-2"><FolderOpen size={13} /> Saved camera notes</div>
+                <button onClick={refreshSavedNotes} disabled={notesLoading} className="border border-gray-300 px-3 py-1.5 hover:border-ink hover:bg-gray-50 text-xs disabled:opacity-50" data-testid="camera-refresh-notes">{notesLoading ? "Loading..." : "Refresh"}</button>
+              </div>
+              <div className="border border-gray-200 max-h-[230px] overflow-auto" data-testid="camera-saved-notes">
+                {savedNotes.length === 0 ? (
+                  <div className="p-4 text-sm text-gray-500">No saved camera notes yet.</div>
+                ) : savedNotes.map((note) => (
+                  <div key={note.note_id} className="border-b border-gray-200 last:border-b-0 p-3 flex items-start justify-between gap-3">
+                    <button onClick={() => loadCameraNote(note)} className="text-left min-w-0 flex-1" data-testid={`camera-load-note-${note.note_id}`}>
+                      <div className="text-sm font-medium truncate">{note.title || "Camera note"}</div>
+                      <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500 truncate">{note.folder || "General"} / {note.source_type || "Document photo"} / {(note.captured_text || "").length.toLocaleString()} chars</div>
+                    </button>
+                    <button onClick={() => deleteCameraNote(note.note_id)} className="text-gray-400 hover:text-red-600 p-1" aria-label="Delete saved note" data-testid={`camera-delete-note-${note.note_id}`}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
   );

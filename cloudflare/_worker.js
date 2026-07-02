@@ -972,32 +972,73 @@ function fallbackCameraAnalysis(text) {
     "**Summary**",
     preview || "No readable document wording was captured.",
     "",
-    "**Key Points**",
+    "**Important Information**",
     "- Check the extracted wording against the photo before relying on it.",
     "- Ask follow-up questions in the chat panel for clause meaning, risks, or next steps.",
+    "",
+    "**Suggested Next Steps**",
+    "- Correct any OCR mistakes in the extracted wording.",
+    "- Save the capture to a folder if it belongs to a matter, research task, or meeting note set.",
+    "",
+    "**Possible Improvements**",
+    "- Retake unclear photos with better lighting and the page filling the frame.",
     "",
     "**Limits**",
     "This is a best-effort OCR analysis and may miss handwriting, small print, or unclear text.",
   ].join("\n"));
 }
 
-async function generateCameraAnalysis(env, text) {
+async function generateCameraAnalysis(env, text, sourceType = "") {
   const captured = normalizeExtractedText(text).slice(0, 12000);
   if (!captured) return fallbackCameraAnalysis("");
+  const source = String(sourceType || "document photo").trim().slice(0, 80);
   const system = [
-    "You analyse photographed document wording captured through OCR.",
+    "You analyse photographed or screenshot document wording captured through OCR.",
     "Use only the captured text. Do not invent missing clauses, signatures, parties, dates, or legal citations.",
+    "The source may be paper, an online document, a website/screen, handwritten notes, slide-deck notes, meeting notes, or a photographed legal/business document.",
+    "Identify the likely type of information, extract the important details, and suggest practical next steps and improvements.",
     "Be practical and concise for a UK legal/document review workflow.",
   ].join("\n");
   const userMessage = [
+    `Source type hint: ${source || "Unknown"}`,
+    "",
     "Captured document wording:",
     captured,
     "",
-    "Return concise Markdown with these headings: Summary, Key Points, Risks / Questions, Suggested Next Actions, Limits.",
+    "Return concise Markdown with these headings:",
+    "Document / Source Type",
+    "Summary",
+    "Important Information",
+    "Risks / Questions",
+    "Suggested Next Steps",
+    "Possible Improvements",
+    "Useful Follow-up Questions",
+    "Limits",
   ].join("\n");
-  const aiResult = await generateToolAnswer(env, DEFAULT_OLLAMA_MODEL, system, userMessage, 820);
+  const aiResult = await generateToolAnswer(env, DEFAULT_OLLAMA_MODEL, system, userMessage, 700);
   if (!aiResult?.answer || looksLikeMissingDocumentRefusal(aiResult.answer)) return fallbackCameraAnalysis(captured);
   return withDisclaimer(cleanToolAnswer(aiResult.answer));
+}
+
+function normalizeCameraNote(user, body) {
+  const now = nowIso();
+  const noteId = String(body.note_id || "").trim() || id("camnote");
+  return {
+    note_id: noteId,
+    owner_id: user.user_id,
+    title: String(body.title || body.filename || "Camera note").trim().slice(0, 120) || "Camera note",
+    folder: String(body.folder || "General").trim().slice(0, 80) || "General",
+    source_type: String(body.source_type || "Document photo").trim().slice(0, 80),
+    filename: String(body.filename || "").trim().slice(0, 180),
+    captured_text: normalizeExtractedText(body.captured_text || body.text || "").slice(0, 60000),
+    analysis: String(body.analysis || "").trim().slice(0, 60000),
+    messages: Array.isArray(body.messages) ? body.messages.slice(0, 30).map((message) => ({
+      question: String(message.question || "").trim().slice(0, 1000),
+      answer: String(message.answer || "").trim().slice(0, 6000),
+    })).filter((message) => message.question || message.answer) : [],
+    created_at: body.created_at || now,
+    updated_at: now,
+  };
 }
 
 async function answerCameraQuestion(env, text, question) {
@@ -3392,19 +3433,18 @@ async function handleApi(request, env) {
     if (!file || typeof file === "string") return error(400, "Image file is required.");
     const text = await extractTextFromImageWithAi(env, file);
     if (!text || text.length < 5) return error(422, "Camera AI could not read document wording from this image. Retake with better lighting, fill the frame with the document, or choose a clearer photo.");
-    const analysis = await generateCameraAnalysis(env, text);
     return json({
       filename: file.name || "camera-photo.jpg",
       text,
-      analysis,
       char_count: text.length,
+      next_step: "analysis_ready",
     });
   }
   if (method === "POST" && path === "/tools/camera-analysis") {
     const body = await parseJson(request);
     const text = String(body.text || "").trim();
     if (!text) return error(422, "Capture or paste document wording before analysing.");
-    return json({ analysis: await generateCameraAnalysis(env, text) });
+    return json({ analysis: await generateCameraAnalysis(env, text, body.source_type) });
   }
   if (method === "POST" && path === "/tools/camera-chat") {
     const body = await parseJson(request);
@@ -3412,6 +3452,23 @@ async function handleApi(request, env) {
     const question = String(body.question || "").trim();
     if (!text || !question) return error(422, "Captured document wording and a question are required.");
     return json({ answer: await answerCameraQuestion(env, text, question) });
+  }
+  if (method === "GET" && path === "/tools/camera-notes") {
+    const notes = await kvList(env, `camera-note:${user.user_id}:`);
+    notes.sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+    return json(notes);
+  }
+  if (method === "POST" && path === "/tools/camera-notes") {
+    const body = await parseJson(request);
+    const note = normalizeCameraNote(user, body);
+    if (!note.captured_text && !note.analysis) return error(422, "Capture or analyse text before saving a note.");
+    await kvPut(env, `camera-note:${user.user_id}:${note.note_id}`, note);
+    return json(note);
+  }
+  const cameraNoteDelete = /^\/tools\/camera-notes\/([^/]+)$/.exec(path);
+  if (method === "DELETE" && cameraNoteDelete) {
+    await kvDelete(env, `camera-note:${user.user_id}:${cameraNoteDelete[1]}`);
+    return json({ ok: true });
   }
   if (method === "POST" && path === "/tools/reader-ocr") {
     const form = await request.formData();
