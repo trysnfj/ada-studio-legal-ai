@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ada-studio",
+  "pages_build_output_dir": "./build",
+  "compatibility_date": "2026-04-08",
+  "kv_namespaces": [
+    {
+      "binding": "ADA_KV",
+      "id": "71b30a8b4db14752a61f00c14e69ddac"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DOCUMENTS_R2",
+      "bucket_name": "ada-studio-documents"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "DOCUMENT_PARSE_QUEUE",
+        "queue": "ada-studio-parse"
+      }
+    ]
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "JWT_SECRET": "replace-with-a-cloudflare-pages-secret"
+  }
+}

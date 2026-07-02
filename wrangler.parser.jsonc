@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ada-studio-parser",
+  "main": "./cloudflare/parser-worker.js",
+  "compatibility_date": "2026-04-08",
+  "kv_namespaces": [
+    {
+      "binding": "ADA_KV",
+      "id": "71b30a8b4db14752a61f00c14e69ddac"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DOCUMENTS_R2",
+      "bucket_name": "ada-studio-documents"
+    }
+  ],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "ada-studio-parse",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 2,
+        "dead_letter_queue": "ada-studio-parse-dlq"
+      }
+    ]
+  },
+  "observability": {
+    "enabled": true
+  }
+}
