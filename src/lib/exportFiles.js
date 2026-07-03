@@ -84,6 +84,10 @@ function zipStore(files) {
   return new Uint8Array([...local, ...central, ...end]);
 }
 
+export function makeZipBlob(files, type = "application/zip") {
+  return new Blob([zipStore(files)], { type });
+}
+
 function docxParagraphXml(line) {
   const trimmed = String(line || "").trim();
   if (!trimmed) return '<w:p><w:r><w:t xml:space="preserve"></w:t></w:r></w:p>';

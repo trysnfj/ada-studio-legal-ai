@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../components/Header";
 import Disclaimer from "../components/Disclaimer";
 import { api } from "../lib/api";
-import { downloadStructuredExport, makeDraftingDocx } from "../lib/exportFiles";
+import { downloadStructuredExport, makeDraftingDocx, makeZipBlob } from "../lib/exportFiles";
 import {
   DRAFTING_DOCUMENT_TYPES,
   DRAFTING_EMPTY_FORM,
@@ -1239,6 +1239,12 @@ const MINI_MODEL_TEST_PROMPTS = [
   "Compare two contract versions.",
 ];
 
+const MINI_CHATGPT_BASE_MODELS = [
+  { id: "HuggingFaceTB/SmolLM2-360M-Instruct", label: "SmolLM2 360M Instruct - fastest demo" },
+  { id: "Qwen/Qwen2.5-0.5B-Instruct", label: "Qwen2.5 0.5B Instruct - balanced mini chat" },
+  { id: "Qwen/Qwen2.5-1.5B-Instruct", label: "Qwen2.5 1.5B Instruct - stronger small model" },
+];
+
 function tokenizeModelText(value) {
   return String(value || "").toLowerCase().match(/[a-z0-9']+|[.,;:!?]/g) || [];
 }
@@ -1326,6 +1332,124 @@ function generateFromMiniModel(model, seed, maxWords = 90) {
     .replace(/(^\w|\.\s+\w)/g, (match) => match.toUpperCase());
 }
 
+function miniChatGptRows(sourceText) {
+  const examples = makeTrainingExamples(sourceText);
+  return examples.map((example) => ({ messages: example.messages }));
+}
+
+function miniChatGptDpoRows(sourceText) {
+  return makeTrainingExamples(sourceText).map((example) => ({
+    prompt: example.messages[0]?.content || example.prompt,
+    chosen: example.messages[1]?.content || example.completion,
+    rejected: "I cannot provide a useful answer. Please review the source manually.",
+  }));
+}
+
+function jsonlFromRows(rows) {
+  return rows.map((row) => JSON.stringify(row)).join("\n");
+}
+
+function miniChatGptScript({ method, baseModel, hubModelId, epochs }) {
+  const configClass = method === "dpo" ? "DPOConfig" : "SFTConfig";
+  const trainerClass = method === "dpo" ? "DPOTrainer" : "SFTTrainer";
+  const defaultData = method === "dpo" ? "train_dpo.jsonl" : "train_sft.jsonl";
+  return `# /// script
+# dependencies = ["trl>=0.12.0", "transformers>=4.45.0", "datasets>=2.20.0", "peft>=0.12.0", "accelerate>=0.34.0", "trackio"]
+# ///
+
+import os
+from datasets import load_dataset
+from peft import LoraConfig
+from trl import ${trainerClass}, ${configClass}
+
+BASE_MODEL = os.getenv("BASE_MODEL", "${baseModel}")
+DATASET_REPO = os.getenv("DATASET_REPO", "")
+DATA_FILE = os.getenv("DATA_FILE", "${defaultData}")
+HUB_MODEL_ID = os.getenv("HUB_MODEL_ID", "${hubModelId || "your-username/ada-mini-chatgpt"}")
+
+if DATASET_REPO:
+    dataset = load_dataset(DATASET_REPO, split="train")
+else:
+    dataset = load_dataset("json", data_files=DATA_FILE, split="train")
+
+trainer = ${trainerClass}(
+    model=BASE_MODEL,
+    train_dataset=dataset,
+    peft_config=LoraConfig(
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.05,
+        target_modules="all-linear",
+        task_type="CAUSAL_LM",
+    ),
+    args=${configClass}(
+        output_dir="ada-mini-chatgpt-${method}",
+        num_train_epochs=${Number(epochs) || 2},
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=8,
+        learning_rate=2e-4,
+        logging_steps=5,
+        save_strategy="epoch",
+        report_to="trackio",
+        project="ada-mini-chatgpt",
+        run_name="ada-mini-chatgpt-${method}",
+        push_to_hub=bool(HUB_MODEL_ID),
+        hub_model_id=HUB_MODEL_ID or None,
+    ),
+)
+
+trainer.train()
+if HUB_MODEL_ID:
+    trainer.push_to_hub()
+`;
+}
+
+function miniChatGptReadme({ name, baseModel, hubModelId, sftRows, dpoRows }) {
+  return `# ${name || "ADA Mini ChatGPT"} Training Pack
+
+This pack turns your ADA Studio datasets into cloud-trainable files for a miniature ChatGPT-style assistant.
+
+## Files
+
+- train_sft.jsonl: supervised fine-tuning chat examples using { "messages": [...] } rows.
+- train_dpo.jsonl: starter preference rows with prompt, chosen, and rejected fields.
+- train_sft.py: Hugging Face TRL SFT LoRA script.
+- train_dpo.py: Hugging Face TRL DPO LoRA script.
+- model-config.json: selected model and training metadata.
+
+## Recommended path
+
+1. Start with SFT.
+2. Test the trained adapter.
+3. Collect thumbs-up/thumbs-down or better-answer pairs.
+4. Convert those pairs into DPO data.
+5. Run DPO for alignment.
+
+## Suggested base model
+
+${baseModel}
+
+## Target Hub model
+
+${hubModelId || "Set HUB_MODEL_ID to your Hugging Face repo, e.g. username/ada-mini-chatgpt"}
+
+## Run locally or in a cloud GPU job
+
+\`\`\`bash
+uv run train_sft.py
+\`\`\`
+
+For Hugging Face Jobs, upload train_sft.jsonl to a dataset repo or keep it beside the script, set HF_TOKEN, and run the UV script on a GPU flavor such as t4-small for demos or a10g-small/a10g-large for stronger runs.
+
+## Dataset summary
+
+- SFT rows: ${sftRows.length}
+- DPO rows: ${dpoRows.length}
+
+Note: this creates a small fine-tuned assistant, not a frontier-scale model. Quality depends on dataset size, consistency, base model strength, and evaluation.
+`;
+}
+
 function MiniModelLab() {
   const [name, setName] = useState("Matter note mini model");
   const [description, setDescription] = useState("Prototype a small language model from uploaded matter notes.");
@@ -1340,6 +1464,9 @@ function MiniModelLab() {
   const [datasetSources, setDatasetSources] = useState([
     { name: "Starter sample", chars: MINI_MODEL_SAMPLE.length, type: "sample" },
   ]);
+  const [cloudBaseModel, setCloudBaseModel] = useState(MINI_CHATGPT_BASE_MODELS[1].id);
+  const [cloudHubModelId, setCloudHubModelId] = useState("your-username/ada-mini-chatgpt");
+  const [cloudEpochs, setCloudEpochs] = useState(2);
   const [savedModels, setSavedModels] = useState([]);
   const [busy, setBusy] = useState(false);
 
@@ -1499,6 +1626,37 @@ function MiniModelLab() {
     downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), `${fileSlug(name)}-model-config.json`);
   };
 
+  const exportMiniChatGptPack = () => {
+    const sftRows = miniChatGptRows(sourceText);
+    const dpoRows = miniChatGptDpoRows(sourceText);
+    if (!sftRows.length) {
+      toast.error("Add training data before exporting a Mini ChatGPT pack");
+      return;
+    }
+    const payload = {
+      name,
+      description,
+      base_model: cloudBaseModel,
+      hub_model_id: cloudHubModelId,
+      epochs: cloudEpochs,
+      training_methods: ["sft", "dpo"],
+      dataset_sources: datasetSources,
+      sft_rows: sftRows.length,
+      dpo_rows: dpoRows.length,
+      created_at: new Date().toISOString(),
+    };
+    const files = [
+      { name: "README.md", content: miniChatGptReadme({ name, baseModel: cloudBaseModel, hubModelId: cloudHubModelId, sftRows, dpoRows }) },
+      { name: "train_sft.jsonl", content: jsonlFromRows(sftRows) },
+      { name: "train_dpo.jsonl", content: jsonlFromRows(dpoRows) },
+      { name: "train_sft.py", content: miniChatGptScript({ method: "sft", baseModel: cloudBaseModel, hubModelId: cloudHubModelId, epochs: cloudEpochs }) },
+      { name: "train_dpo.py", content: miniChatGptScript({ method: "dpo", baseModel: cloudBaseModel, hubModelId: cloudHubModelId, epochs: cloudEpochs }) },
+      { name: "model-config.json", content: JSON.stringify(payload, null, 2) },
+    ];
+    downloadBlob(makeZipBlob(files), `${fileSlug(name || "ada-mini-chatgpt")}-cloud-training-pack.zip`);
+    toast.success("Exported Mini ChatGPT cloud training pack");
+  };
+
   const saveModel = async () => {
     const examples = dataset.length ? dataset : makeTrainingExamples(sourceText);
     if (!model) {
@@ -1655,6 +1813,35 @@ function MiniModelLab() {
               <Save size={14} /> {busy ? "Saving..." : "Save"}
             </button>
           </div>
+
+          <section className="mt-5 border border-klein bg-klein-bg p-4" data-testid="mini-chatgpt-cloud-builder">
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-klein mb-1">Cloud Mini ChatGPT</div>
+                <h3 className="font-serif text-2xl leading-tight">Build a small chat model from this dataset</h3>
+                <p className="text-sm text-gray-700 mt-1">Export SFT and DPO training files plus Hugging Face TRL scripts for a cloud GPU run.</p>
+              </div>
+              <button onClick={exportMiniChatGptPack} className="bg-ink text-white px-4 py-2.5 hover:bg-klein text-sm inline-flex items-center gap-2 shrink-0" data-testid="mini-chatgpt-export-pack">
+                <Download size={14} /> Export training pack
+              </button>
+            </div>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <label>
+                <span className="block text-xs font-bold uppercase tracking-wider mb-1">Base model</span>
+                <select value={cloudBaseModel} onChange={(e) => setCloudBaseModel(e.target.value)} className="w-full border border-gray-300 bg-white px-3 py-2.5 text-sm" data-testid="mini-chatgpt-base-model">
+                  {MINI_CHATGPT_BASE_MODELS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span className="block text-xs font-bold uppercase tracking-wider mb-1">Hub model id</span>
+                <input value={cloudHubModelId} onChange={(e) => setCloudHubModelId(e.target.value)} className="w-full border border-gray-300 px-3 py-2.5 text-sm" data-testid="mini-chatgpt-hub-id" />
+              </label>
+              <label>
+                <span className="block text-xs font-bold uppercase tracking-wider mb-1">Epochs</span>
+                <input type="number" min="1" max="6" value={cloudEpochs} onChange={(e) => setCloudEpochs(Math.max(1, Math.min(6, Number(e.target.value) || 2)))} className="w-full border border-gray-300 px-3 py-2.5 text-sm" data-testid="mini-chatgpt-epochs" />
+              </label>
+            </div>
+          </section>
         </section>
 
         <aside className="lg:col-span-5 space-y-5">

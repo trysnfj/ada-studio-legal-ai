@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { TextEncoder } from "util";
-import { makeDraftingDocx, makeSimplePdf } from "./exportFiles";
+import { makeDraftingDocx, makeSimplePdf, makeZipBlob } from "./exportFiles";
 import {
   DRAFTING_DOCUMENT_TYPES,
   DRAFTING_EMPTY_FORM,
@@ -83,6 +83,12 @@ describe("Drafting Tool", () => {
     expect(String.fromCharCode(...(await blobBytes(docx)).slice(0, 2))).toBe("PK");
     const pdf = makeSimplePdf("Edited letter text");
     expect(String.fromCharCode(...(await blobBytes(pdf)).slice(0, 4))).toBe("%PDF");
+  });
+
+  test("creates ZIP training pack blobs", async () => {
+    const zip = makeZipBlob([{ name: "train_sft.jsonl", content: "{\"messages\":[]}" }]);
+    expect(zip.type).toBe("application/zip");
+    expect(String.fromCharCode(...(await blobBytes(zip)).slice(0, 2))).toBe("PK");
   });
 
   test("sanitises filenames and normalises old records", () => {
@@ -194,10 +200,16 @@ describe("Mini Model Lab", () => {
     expect(tools).toContain("generateFromMiniModel");
     expect(tools).toContain("MINI_MODEL_LEGAL_DATASET");
     expect(tools).toContain("MINI_MODEL_TEST_PROMPTS");
+    expect(tools).toContain("MINI_CHATGPT_BASE_MODELS");
+    expect(tools).toContain("miniChatGptRows");
+    expect(tools).toContain("miniChatGptDpoRows");
+    expect(tools).toContain("miniChatGptScript");
     expect(tools).toContain("loadTrainingFiles");
     expect(tools).toContain("appendDatasetText");
     expect(tools).toContain('data-testid="mini-model-load-legal-dataset"');
     expect(tools).toContain('data-testid="mini-model-dataset-manager"');
+    expect(tools).toContain('data-testid="mini-chatgpt-cloud-builder"');
+    expect(tools).toContain('data-testid="mini-chatgpt-export-pack"');
     expect(tools).toContain('data-testid="mini-model-test-prompts"');
     expect(tools).toContain("multiple hidden");
     expect(tools).toContain('data-testid="mini-model-export-jsonl"');

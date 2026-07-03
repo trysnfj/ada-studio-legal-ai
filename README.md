@@ -14,7 +14,7 @@ ADA Studio is a legal AI workspace for building and running source-grounded lega
 - Case-law search with AI summaries and BAILII links.
 - Drafting Tool for legal correspondence, including letters of claim and settlement letters.
 - Chronology Builder for extracting dated matter events.
-- Mini Model Lab for preparing JSONL datasets, loading a comprehensive synthetic legal workflow training dataset, appending multiple user-uploaded datasets, training tiny browser language models, testing them in a ChatGPT-style playground, saving experiments, and exporting configs for GPU training workflows.
+- Mini Model Lab for preparing JSONL datasets, loading a comprehensive synthetic legal workflow training dataset, appending multiple user-uploaded datasets, training tiny browser language models, testing them in a ChatGPT-style playground, saving experiments, and exporting Mini ChatGPT cloud training packs with SFT/DPO JSONL plus Hugging Face TRL scripts.
 - Compare tool for side-by-side document review.
 - Standalone Camera Document AI at `/camera` for photo/screenshot OCR, source-type-aware summaries, chat, saved note folders, and Word/PDF exports.
 - Guided Reader with file upload, camera OCR, summary, chat, and document export.
