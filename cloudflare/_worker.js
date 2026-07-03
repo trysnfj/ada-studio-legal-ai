@@ -1089,6 +1089,11 @@ function normalizeMiniModelRecord(user, body) {
       role: String(message.role || "assistant").trim() === "user" ? "user" : "assistant",
       content: String(message.content || "").trim().slice(0, 4000),
     })).filter((message) => message.content) : [],
+    dataset_sources: Array.isArray(body.dataset_sources) ? body.dataset_sources.slice(0, 80).map((source) => ({
+      name: String(source.name || "Dataset source").trim().slice(0, 180) || "Dataset source",
+      type: String(source.type || "dataset").trim().slice(0, 40) || "dataset",
+      chars: Number(source.chars || 0) || 0,
+    })).filter((source) => source.name) : [],
     created_at: body.created_at || now,
     updated_at: now,
   };

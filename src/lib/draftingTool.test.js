@@ -194,8 +194,12 @@ describe("Mini Model Lab", () => {
     expect(tools).toContain("generateFromMiniModel");
     expect(tools).toContain("MINI_MODEL_LEGAL_DATASET");
     expect(tools).toContain("MINI_MODEL_TEST_PROMPTS");
+    expect(tools).toContain("loadTrainingFiles");
+    expect(tools).toContain("appendDatasetText");
     expect(tools).toContain('data-testid="mini-model-load-legal-dataset"');
+    expect(tools).toContain('data-testid="mini-model-dataset-manager"');
     expect(tools).toContain('data-testid="mini-model-test-prompts"');
+    expect(tools).toContain("multiple hidden");
     expect(tools).toContain('data-testid="mini-model-export-jsonl"');
     expect(tools).toContain('data-testid="mini-model-train"');
     expect(tools).toContain('data-testid="mini-model-chat-thread"');
@@ -211,5 +215,6 @@ describe("Mini Model Lab", () => {
     expect(worker).toContain("mini-model:${user.user_id}");
     expect(worker).toContain("model_lab");
     expect(worker).toContain("chat_messages");
+    expect(worker).toContain("dataset_sources");
   });
 });

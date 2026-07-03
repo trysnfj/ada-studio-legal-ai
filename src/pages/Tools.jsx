@@ -1150,6 +1150,78 @@ Assistant response: Client questions: when did the issue begin, who was involved
 User prompt: Prepare a document review output.
 Assistant response: Output format: Summary, Important Information, Key Risks, Missing Information, Suggested Next Steps, Follow-up Questions, and Limits. Keep the wording practical and source-grounded.
 
+User prompt: Review a non-payment issue.
+Assistant response: Summary: the client reports non-payment under a contract or invoice. Important information: identify the invoice date, payment deadline, contractual interest, disputed items, prior reminders, and evidence of service. Suggested next steps: confirm the debt, send a payment demand, preserve correspondence, and diary the limitation date.
+
+User prompt: Review a service-level breach.
+Assistant response: Summary: the issue concerns poor performance or missed service levels. Important checks: service standard, measurement period, reporting obligations, cure period, service credits, termination trigger, and exclusions. Suggested next steps: build a chronology, gather performance reports, and send a notice reserving rights.
+
+User prompt: Analyse confidentiality wording.
+Assistant response: Summary: confidentiality wording controls use and disclosure of protected information. Important checks: definition of confidential information, permitted recipients, exceptions, duration, return or destruction obligations, affiliates, regulators, and remedies for breach.
+
+User prompt: Analyse data protection wording.
+Assistant response: Summary: data protection wording may create compliance and operational duties. Important checks: controller or processor role, processing instructions, security measures, sub-processors, international transfers, breach notification, audit rights, and deletion or return of data.
+
+User prompt: Review governing law and jurisdiction.
+Assistant response: Summary: governing law and jurisdiction decide which law applies and where disputes are heard. Important checks: exclusive or non-exclusive jurisdiction, arbitration, service of proceedings, consumer or employment restrictions, and consistency with the parties and transaction.
+
+User prompt: Review an exclusion clause.
+Assistant response: Summary: an exclusion clause may limit recoverable losses. Important checks: excluded loss categories, indirect loss, loss of profit, loss of data, statutory controls, reasonableness, carve-outs, and whether the wording conflicts with indemnities or caps.
+
+User prompt: Review an assignment clause.
+Assistant response: Summary: an assignment clause controls transfer of rights and obligations. Important checks: consent requirements, group transfers, business sale exceptions, novation, subcontracting, and whether consent can be withheld reasonably.
+
+User prompt: Review a renewal clause.
+Assistant response: Summary: renewal wording may create automatic extensions. Important checks: renewal date, notice window, price changes, termination rights, minimum term, and whether the client must send notice before a deadline.
+
+User prompt: Build a claim evidence list.
+Assistant response: Evidence list: signed contract, variations, purchase orders, invoices, delivery records, emails, meeting notes, photographs, screenshots, complaint letters, mitigation records, loss calculation, and witness names. Each item should include source, date, relevance, and gap.
+
+User prompt: Identify missing information.
+Assistant response: Missing information: exact dates, signed contract version, notice address, loss calculation, correspondence trail, witness evidence, mitigation steps, authority to settle, and the client's desired outcome. Ask targeted follow-up questions before drafting.
+
+User prompt: Prepare a client update.
+Assistant response: Client update structure: short summary, work completed, key findings, risks, next steps, decisions needed, deadline, and documents required. Tone should be practical, calm, and clear.
+
+User prompt: Prepare a risk register.
+Assistant response: Risk register format: issue, source, likelihood, impact, owner, mitigation, deadline, and status. Prioritise limitation dates, defective notice, weak evidence, unclear loss, and adverse costs exposure.
+
+User prompt: Summarise uploaded notes.
+Assistant response: Summary: extract the main issue, parties, dates, obligations, deadlines, documents mentioned, risks, and actions. Suggested next steps: verify unclear points, save the note to the correct matter folder, and ask a focused follow-up question.
+
+User prompt: Analyse meeting notes.
+Assistant response: Meeting note analysis: identify attendees, date, decisions, admissions, agreed actions, deadlines, open questions, and documents requested. Suggested next steps: circulate a confirmation note and diary follow-up dates.
+
+User prompt: Analyse slide-deck notes.
+Assistant response: Slide-deck note analysis: identify the topic, key claims, figures, deadlines, dependencies, and action owners. Suggested next steps: verify source material, extract tasks, and ask whether any slide creates legal or commercial risk.
+
+User prompt: Ask questions about captured text.
+Assistant response: Use the captured text only. If the answer is present, answer directly and identify the wording relied on. If the answer is not present, say the captured text does not contain enough information and ask for the missing page or document.
+
+User prompt: Produce a bundle index.
+Assistant response: Bundle index format: tab number, document title, date, source, description, relevance, and page range. Keep file names consistent and include a source list appendix for export.
+
+User prompt: Prepare a pleading issue list.
+Assistant response: Issue list: parties, duty or obligation, breach, causation, loss, remedies, limitation, evidence, defences, and procedural next steps. Each issue should link to documents or facts where possible.
+
+User prompt: Review settlement risk.
+Assistant response: Settlement risk review: compare settlement amount with claim value, evidence strength, legal risk, costs risk, enforcement risk, timing, confidentiality, tax, payment security, and release wording.
+
+User prompt: Prepare without prejudice correspondence.
+Assistant response: Drafting pattern: mark the letter without prejudice where appropriate, summarise the dispute, set out the commercial proposal, avoid admissions, state payment terms, reserve rights, and include a clear response deadline.
+
+User prompt: Draft a document request.
+Assistant response: Document request structure: identify the matter, explain why documents are required, list specific documents, request native format where useful, set a deadline, preserve rights, and ask for confirmation if documents are unavailable.
+
+User prompt: Summarise case authority.
+Assistant response: Case authority summary: citation, court, date, issue, material facts, legal principle, outcome, relevance, limits, and whether the full judgment should be checked before relying on it.
+
+User prompt: Improve a legal answer.
+Assistant response: Improved legal answer format: direct answer first, then reasoning, source citations, assumptions, missing information, risk rating, recommended next steps, and a short client-friendly summary.
+
+User prompt: Train on a new dataset.
+Assistant response: Dataset guidance: add source text with repeated prompt and response patterns, include realistic test prompts, keep answer formats consistent, repeat important phrases, and retrain the n-gram model after uploading each dataset.
+
 Test prompt: What should I check next?
 Expected behaviour: the model should mention checking clauses, deadlines, evidence, losses, notice, and next steps.
 
@@ -1265,6 +1337,9 @@ function MiniModelLab() {
   const [sample, setSample] = useState("");
   const [chatPrompt, setChatPrompt] = useState("What should I check next?");
   const [chatMessages, setChatMessages] = useState([]);
+  const [datasetSources, setDatasetSources] = useState([
+    { name: "Starter sample", chars: MINI_MODEL_SAMPLE.length, type: "sample" },
+  ]);
   const [savedModels, setSavedModels] = useState([]);
   const [busy, setBusy] = useState(false);
 
@@ -1275,8 +1350,9 @@ function MiniModelLab() {
       tokens: tokens.length,
       vocabulary: new Set(tokens).size,
       examples: dataset.length,
+      sources: datasetSources.length,
     };
-  }, [sourceText, dataset.length]);
+  }, [sourceText, dataset.length, datasetSources.length]);
 
   const refreshModels = async () => {
     try {
@@ -1289,28 +1365,62 @@ function MiniModelLab() {
 
   useEffect(() => { refreshModels(); }, []);
 
-  const loadTrainingFile = async (file) => {
-    if (!file) return;
-    const text = await file.text();
-    setSourceText(text);
-    setName(file.name.replace(/\.[^.]+$/, "") || "Uploaded mini model");
+  const resetTrainingState = () => {
     setDataset([]);
     setModel(null);
     setSample("");
     setChatMessages([]);
   };
 
+  const appendDatasetText = (label, text, type = "upload") => {
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return false;
+    setSourceText((current) => {
+      const separator = current.trim() ? `\n\n--- Dataset source: ${label} ---\n\n` : "";
+      return `${current.trim()}${separator}${cleanText}`;
+    });
+    setDatasetSources((current) => [...current, { name: label, chars: cleanText.length, type }]);
+    resetTrainingState();
+    return true;
+  };
+
+  const loadTrainingFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    let added = 0;
+    for (const file of files) {
+      const text = await file.text();
+      if (appendDatasetText(file.name, text, "upload")) added += 1;
+    }
+    if (added) {
+      setName((current) => current === "Matter note mini model" ? "Uploaded dataset n-gram model" : current);
+      toast.success(`Added ${added} dataset ${added === 1 ? "file" : "files"}`);
+    }
+  };
+
   const loadLegalDataset = () => {
     setName("Legal workflow n-gram model");
     setDescription("Synthetic legal workflow dataset optimised for testing the browser n-gram playground.");
     setSourceText(MINI_MODEL_LEGAL_DATASET);
+    setDatasetSources([{ name: "Built-in comprehensive legal workflow dataset", chars: MINI_MODEL_LEGAL_DATASET.length, type: "built-in" }]);
     setSeed(MINI_MODEL_TEST_PROMPTS[0]);
     setChatPrompt(MINI_MODEL_TEST_PROMPTS[0]);
-    setDataset([]);
-    setModel(null);
-    setSample("");
-    setChatMessages([]);
+    resetTrainingState();
     toast.success("Loaded legal workflow training dataset");
+  };
+
+  const loadSampleDataset = () => {
+    setName("Matter note mini model");
+    setDescription("Prototype a small language model from uploaded matter notes.");
+    setSourceText(MINI_MODEL_SAMPLE);
+    setDatasetSources([{ name: "Starter sample", chars: MINI_MODEL_SAMPLE.length, type: "sample" }]);
+    resetTrainingState();
+  };
+
+  const clearTrainingData = () => {
+    setSourceText("");
+    setDatasetSources([]);
+    resetTrainingState();
   };
 
   const prepareDataset = () => {
@@ -1406,6 +1516,7 @@ function MiniModelLab() {
         stats,
         model_data: model,
         chat_messages: chatMessages,
+        dataset_sources: datasetSources,
       });
       setSavedModels((current) => [data, ...current.filter((item) => item.model_id !== data.model_id)]);
       toast.success("Saved mini model");
@@ -1420,6 +1531,7 @@ function MiniModelLab() {
     setName(record.name || "Saved mini model");
     setDescription(record.description || "");
     setSourceText(record.source_text || "");
+    setDatasetSources(record.dataset_sources || [{ name: record.name || "Saved mini model source", chars: (record.source_text || "").length, type: "saved" }]);
     setDataset(makeTrainingExamples(record.source_text || ""));
     setModel(record.model_data || null);
     const loadedSample = record.model_data?.transitions ? generateFromMiniModel(record.model_data, seed) : "";
@@ -1472,35 +1584,53 @@ function MiniModelLab() {
           </label>
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <label className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs inline-flex items-center gap-2 cursor-pointer" data-testid="mini-model-upload">
-              <Upload size={13} /> Upload .txt/.md/.jsonl
-              <input type="file" accept=".txt,.md,.json,.jsonl,text/plain,application/json" hidden onChange={(e) => loadTrainingFile(e.target.files?.[0])} />
+              <Upload size={13} /> Add dataset files
+              <input type="file" accept=".txt,.md,.json,.jsonl,text/plain,application/json" multiple hidden onChange={(e) => { void loadTrainingFiles(e.target.files); e.target.value = ""; }} />
             </label>
             <button onClick={loadLegalDataset} className="bg-klein text-white px-3 py-2 hover:bg-ink text-xs inline-flex items-center gap-2" data-testid="mini-model-load-legal-dataset">
-              <Sparkles size={13} /> Load legal n-gram dataset
+              <Sparkles size={13} /> Load comprehensive legal dataset
             </button>
-            <button onClick={() => setSourceText(MINI_MODEL_SAMPLE)} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Load sample</button>
-            <button onClick={() => { setSourceText(""); setDataset([]); setModel(null); setSample(""); setChatMessages([]); }} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Clear</button>
+            <button onClick={loadSampleDataset} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Load sample</button>
+            <button onClick={clearTrainingData} className="border border-gray-300 px-3 py-2 hover:border-ink hover:bg-gray-50 text-xs">Clear</button>
+          </div>
+          <div className="mb-3 border border-gray-200 bg-gray-50 p-3" data-testid="mini-model-dataset-manager">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-gray-500">Dataset sources</div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-klein">{datasetSources.length} active</div>
+            </div>
+            {datasetSources.length === 0 ? (
+              <div className="text-xs text-gray-500">No active training sources. Load the comprehensive dataset or add your own files.</div>
+            ) : (
+              <div className="max-h-[110px] overflow-auto border border-gray-200 bg-white">
+                {datasetSources.map((source, index) => (
+                  <div key={`${source.name}-${index}`} className="px-3 py-2 border-b border-gray-100 last:border-b-0 flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate">{source.name}</span>
+                    <span className="font-mono text-gray-500 shrink-0">{source.type || "dataset"} / {source.chars.toLocaleString()} chars</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-2 text-xs text-gray-600">Add multiple files to keep expanding the same training corpus, then press Train browser model again to use the updated model in the chat playground.</p>
           </div>
           <textarea
             value={sourceText}
             onChange={(e) => {
               setSourceText(e.target.value);
-              setDataset([]);
-              setModel(null);
-              setSample("");
-              setChatMessages([]);
+              setDatasetSources([{ name: "Manual editor text", chars: e.target.value.length, type: "manual" }]);
+              resetTrainingState();
             }}
             rows={14}
             placeholder="Paste source text, notes, clauses, correspondence, or JSONL training material."
             className="w-full border border-gray-300 px-3 py-2.5 text-sm leading-relaxed focus:border-klein focus:outline-none"
             data-testid="mini-model-source"
           />
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 border-l border-t border-gray-200 mt-4" data-testid="mini-model-stats">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-0 border-l border-t border-gray-200 mt-4" data-testid="mini-model-stats">
             {[
               ["Characters", stats.chars.toLocaleString()],
               ["Tokens", stats.tokens.toLocaleString()],
               ["Vocabulary", stats.vocabulary.toLocaleString()],
               ["Examples", stats.examples.toLocaleString()],
+              ["Sources", stats.sources.toLocaleString()],
             ].map(([label, value]) => (
               <div key={label} className="border-r border-b border-gray-200 p-3">
                 <div className="font-serif text-2xl">{value}</div>
